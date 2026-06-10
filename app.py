@@ -37,7 +37,44 @@ def get_system_status():
 # Context processor ile tüm template'lerde tema erişilebilir
 @app.context_processor
 def inject_theme():
-    return dict(tema=get_theme('light'), system_status=get_system_status())
+    import datetime
+    def get_freshness(expiry_date, created_at):
+        if not expiry_date:
+            return {"percentage": 100, "status": "Taze", "color": "success"}
+        try:
+            exp_str = str(expiry_date).strip()
+            if len(exp_str) > 10:
+                exp_str = exp_str[:10]
+            expiry = datetime.datetime.strptime(exp_str, "%Y-%m-%d").date()
+            
+            created_str = str(created_at).strip() if created_at else ""
+            if created_str:
+                if len(created_str) > 10:
+                    created_str = created_str[:10]
+                created = datetime.datetime.strptime(created_str, "%Y-%m-%d").date()
+            else:
+                created = datetime.date.today()
+                
+            today = datetime.date.today()
+            total_days = (expiry - created).days
+            remaining_days = (expiry - today).days
+            
+            if remaining_days <= 0:
+                return {"percentage": 0, "status": "Bozulmuş", "color": "danger"}
+            if total_days <= 0:
+                return {"percentage": 100, "status": "Taze", "color": "success"}
+                
+            pct = min(100, max(0, int((remaining_days / total_days) * 100)))
+            if pct > 60:
+                return {"percentage": pct, "status": "Taze", "color": "success"}
+            elif pct > 25:
+                return {"percentage": pct, "status": "Kritik", "color": "warning"}
+            else:
+                return {"percentage": pct, "status": "Bozulmak Üzere", "color": "danger"}
+        except Exception as e:
+            return {"percentage": 100, "status": "Taze", "color": "success"}
+
+    return dict(tema=get_theme('light'), system_status=get_system_status(), get_freshness=get_freshness)
 
 # --- Launcher (Ana Sayfa) ---
 @app.route("/")
@@ -284,7 +321,36 @@ def run_vision_engine_thread():
         print("[VISION THREAD] Config oluşturuldu, pipeline başlatılıyor...")
         pipeline = VisionPipeline(config)
         print("[VISION THREAD] Pipeline hazır, kameraya bağlanılıyor...")
-        
+        # Threaded camera class to eliminate buffer latency
+        import cv2
+        import threading
+        class ThreadedCamera:
+            def __init__(self, src):
+                self.cap = cv2.VideoCapture(src)
+                self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                self.ret = False
+                self.frame = None
+                self.running = True
+                self.thread = threading.Thread(target=self._reader)
+                self.thread.daemon = True
+                self.thread.start()
+                
+            def _reader(self):
+                while self.running:
+                    ret, frame = self.cap.read()
+                    if ret:
+                        self.ret = ret
+                        self.frame = frame
+                    else:
+                        _time.sleep(0.01)
+                        
+            def read(self):
+                return self.ret, self.frame
+                
+            def release(self):
+                self.running = False
+                self.cap.release()
+
         def update_frame(frame):
             global latest_frame, vision_running
             ret, buffer = cv2.imencode('.jpg', frame)
@@ -292,8 +358,6 @@ def run_vision_engine_thread():
                 latest_frame = buffer.tobytes()
             return vision_running
 
-        # Event callback: her olay oluştuğunda bellekteki listeye ekle
-        original_run = pipeline.run
         def patched_run(source, output_dir, frame_callback=None):
             """pipeline.run'ı sarıp olayları canlı yakalayan wrapper."""
             global live_events
@@ -302,6 +366,8 @@ def run_vision_engine_thread():
             import time as _time
             from pathlib import Path as _Path
             from collections import Counter
+
+            cam_source = int(source) if str(source).isdigit() else source
 
             session_id = build_session_id(str(source))
             started_at, started_perf = utc_now_iso(), _time.perf_counter()
@@ -315,72 +381,101 @@ def run_vision_engine_thread():
             )
 
             events, frame_index = [], 0
-            stream = pipeline.detector.get_stream(source, pipeline.config)
             tracker = SimpleTracker(pipeline.config.tracker_iou_threshold, pipeline.config.tracker_max_misses) if pipeline.config.tracker_mode == "simple" else None
 
+            print(f"[VISION THREAD] ThreadedCamera başlatılıyor: {cam_source}")
+            cam = ThreadedCamera(cam_source)
+            _time.sleep(1.0) # Kameranın ısınması için bekle
+
             try:
-                for result in stream:
-                    try:
-                        frame_index += 1
-                        height, width = result.orig_shape
-                        active_ids = set()
-                        tracked_objects = pipeline._get_tracked(result, tracker)
+                while vision_running:
+                    ret, frame = cam.read()
+                    if not ret or frame is None:
+                        _time.sleep(0.01)
+                        continue
                         
-                        for tracked in tracked_objects:
-                            x1, y1, x2, y2 = tracked["bbox"]
-                            side = counter.compute_side((x1+x2)/2, (y1+y2)/2, width, height)
-                            p_name = pipeline.detector.class_names.get(tracked["class_id"], str(tracked["class_id"]))
-                            active_ids.add(tracked["track_id"])
-
-                            event = counter.register_detection(
-                                track_id=tracked["track_id"], product_name=p_name,
-                                confidence=tracked["confidence"], frame_index=frame_index, side=side
-                            )
-                            if event:
-                                # Çeviri tablosundan Türkçe karşılığını çek
-                                tr_name = TRANSLATIONS.get(event.product_name.lower(), event.product_name)
-                                event.product_name = tr_name
-                                e_dict = event.to_dict()
-                                
-                                # Olay anındaki nesne görüntüsünü kırpıp kaydet
-                                try:
-                                    cx1, cy1, cx2, cy2 = [int(v) for v in tracked["bbox"]]
-                                    h_img, w_img = result.orig_img.shape[:2]
-                                    cx1, cy1 = max(0, cx1), max(0, cy1)
-                                    cx2, cy2 = min(w_img, cx2), min(h_img, cy2)
-                                    
-                                    if cx2 > cx1 and cy2 > cy1:
-                                        cropped = result.orig_img[cy1:cy2, cx1:cx2]
-                                        safe_pname = tr_name.replace(' ', '_').lower()
-                                        photo_rel_path = f"items_photos/{safe_pname}.jpg"
-                                        photo_full_path = os.path.join("static", photo_rel_path)
-                                        cv2.imwrite(photo_full_path, cropped)
-                                        e_dict["image_path"] = photo_rel_path
-                                    else:
-                                        e_dict["image_path"] = None
-                                except Exception as img_err:
-                                    print(f"[VISION PHOTO] Resim kaydetme hatası: {img_err}")
-                                    e_dict["image_path"] = None
-
-                                events.append(e_dict)
-                                live_events.append(e_dict)  # Canlı listeye ekle!
-                                print(f"[EVENT] {e_dict['timestamp_utc']} - {e_dict['product_name']}: {e_dict['action']}")
-
-                        counter.prune_stale_tracks(frame_index, active_ids)
-
-                        # Frame çiz ve callback'e gönder
-                        frame = pipeline._draw(result.orig_img.copy(), tracked_objects, len(events), width, height)
+                    frame_index += 1
+                    
+                    # Raspberry Pi CPU yükünü azaltmak için frame skipping
+                    # Ancak atlanan karelerde tarayıcıya ham görüntüyü gönderiyoruz ki yayın pürüzsüz aksın
+                    if pipeline.config.vid_stride > 1 and (frame_index % pipeline.config.vid_stride) != 0:
                         if frame_callback:
                             should_continue = frame_callback(frame)
                             if should_continue is False:
                                 break
-                    except Exception as e:
-                        print(f"[WARNING] Frame hatası: {e}")
-                        break
-            finally:
-                cv2.destroyAllWindows()
+                        continue
+                    
+                    results = pipeline.detector.model.predict(
+                        frame, 
+                        imgsz=pipeline.config.imgsz, 
+                        conf=pipeline.config.conf, 
+                        iou=pipeline.config.iou, 
+                        device=pipeline.config.device, 
+                        verbose=False
+                    )
+                    
+                    if not results:
+                        if frame_callback:
+                            should_continue = frame_callback(frame)
+                            if should_continue is False:
+                                break
+                        continue
+                        
+                    result = results[0]
+                    height, width = result.orig_shape
+                    active_ids = set()
+                    tracked_objects = pipeline._get_tracked(result, tracker)
+                    
+                    for tracked in tracked_objects:
+                        x1, y1, x2, y2 = tracked["bbox"]
+                        side = counter.compute_side((x1+x2)/2, (y1+y2)/2, width, height)
+                        p_name = pipeline.detector.class_names.get(tracked["class_id"], str(tracked["class_id"]))
+                        active_ids.add(tracked["track_id"])
 
-            return pipeline._save_results(session_id, source, frame_index, events, started_at, started_perf, output_path)
+                        event = counter.register_detection(
+                            track_id=tracked["track_id"], product_name=p_name,
+                            confidence=tracked["confidence"], frame_index=frame_index, side=side
+                        )
+                        if event:
+                            tr_name = TRANSLATIONS.get(event.product_name.lower(), event.product_name)
+                            event.product_name = tr_name
+                            e_dict = event.to_dict()
+                            
+                            try:
+                                cx1, cy1, cx2, cy2 = [int(v) for v in tracked["bbox"]]
+                                h_img, w_img = frame.shape[:2]
+                                cx1, cy1 = max(0, cx1), max(0, cy1)
+                                cx2, cy2 = min(w_img, cx2), min(h_img, cy2)
+                                
+                                if cx2 > cx1 and cy2 > cy1:
+                                    cropped = frame[cy1:cy2, cx1:cx2]
+                                    safe_pname = tr_name.replace(' ', '_').lower()
+                                    photo_rel_path = f"items_photos/{safe_pname}.jpg"
+                                    photo_full_path = os.path.join("static", photo_rel_path)
+                                    cv2.imwrite(photo_full_path, cropped)
+                                    e_dict["image_path"] = photo_rel_path
+                                else:
+                                    e_dict["image_path"] = None
+                            except Exception as img_err:
+                                print(f"[VISION PHOTO] Resim kaydetme hatası: {img_err}")
+                                e_dict["image_path"] = None
+
+                            events.append(e_dict)
+                            live_events.append(e_dict)
+                            print(f"[EVENT] {e_dict['timestamp_utc']} - {e_dict['product_name']}: {e_dict['action']}")
+
+                    counter.prune_stale_tracks(frame_index, active_ids)
+
+                    annotated_frame = pipeline._draw(frame.copy(), tracked_objects, len(events), width, height)
+                    if frame_callback:
+                        should_continue = frame_callback(annotated_frame)
+                        if should_continue is False:
+                            break
+            except Exception as loop_err:
+                print(f"[VISION THREAD] Döngü hatası: {loop_err}")
+            finally:
+                cam.release()
+                cv2.destroyAllWindows()
 
         patched_run(video_source, "package-b-vision/output", frame_callback=update_frame)
         print("[VISION THREAD] Pipeline.run() sona erdi.")

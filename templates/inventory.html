@@ -49,10 +49,11 @@
                             </td>
                             <td class="text-center">
                                 {% if row['expiry_date'] %}
-                                    <div class="progress bg-dark" style="height: 6px; width: 80px; margin: 0 auto 5px;">
-                                        <div class="progress-bar bg-success" style="width: 85%"></div>
+                                    {% set f = get_freshness(row['expiry_date'], row['created_at']) %}
+                                    <div class="progress bg-dark" style="height: 6px; width: 80px; margin: 0 auto 5px;" title="Kalan Tazelik: %{{ f.percentage }}">
+                                        <div class="progress-bar bg-{{ f.color }}" style="width: {{ f.percentage }}%"></div>
                                     </div>
-                                    <span class="small text-success">Taze</span>
+                                    <span class="small text-{{ f.color }}">{{ f.status }} (%{{ f.percentage }})</span>
                                 {% else %}
                                     <span class="small text-muted">-</span>
                                 {% endif %}

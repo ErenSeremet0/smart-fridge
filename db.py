@@ -82,6 +82,9 @@ def create_tables():
 
 # --- INVENTORY HELPERS ---
 def ensure_item(class_name, expiry_date=None, image_path=None):
+    if not expiry_date or expiry_date.strip() == "":
+        import datetime
+        expiry_date = (datetime.date.today() + datetime.timedelta(days=5)).strftime("%Y-%m-%d")
     conn = get_connection()
     c = conn.cursor()
     c.execute("""
@@ -100,6 +103,9 @@ def get_quantity(class_name):
     return row[0] if row else 0
 
 def update_inventory(class_name, change_amount, expiry_date=None, image_path=None, source="manual"):
+    if expiry_date and expiry_date.strip() == "":
+        expiry_date = None
+        
     ensure_item(class_name, expiry_date, image_path)
     old_qty = get_quantity(class_name)
     new_qty = max(0, old_qty + change_amount)
@@ -109,19 +115,33 @@ def update_inventory(class_name, change_amount, expiry_date=None, image_path=Non
     c = conn.cursor()
 
     # inventory güncelle
-    sql = "UPDATE inventory SET quantity = ?, updated_at = ?"
-    params = [new_qty, now()]
-    
-    if expiry_date:
-        sql += ", expiry_date = ?"
-        params.append(expiry_date)
-    if image_path:
-        sql += ", image_path = ?"
-        params.append(image_path)
+    if change_amount > 0:
+        if not expiry_date:
+            import datetime
+            expiry_date = (datetime.date.today() + datetime.timedelta(days=5)).strftime("%Y-%m-%d")
         
-    sql += " WHERE class_name = ?"
-    params.append(class_name)
-    
+        sql = "UPDATE inventory SET quantity = ?, updated_at = ?, expiry_date = ?, created_at = ?"
+        params = [new_qty, now(), expiry_date, now()]
+        
+        if image_path:
+            sql += ", image_path = ?"
+            params.append(image_path)
+            
+        sql += " WHERE class_name = ?"
+        params.append(class_name)
+    else:
+        sql = "UPDATE inventory SET quantity = ?, updated_at = ?"
+        params = [new_qty, now()]
+        if expiry_date:
+            sql += ", expiry_date = ?"
+            params.append(expiry_date)
+        if image_path:
+            sql += ", image_path = ?"
+            params.append(image_path)
+            
+        sql += " WHERE class_name = ?"
+        params.append(class_name)
+        
     c.execute(sql, tuple(params))
 
     # log ekle
@@ -144,10 +164,17 @@ def get_shopping_list():
 def add_to_shopping_list(class_name, quantity=1):
     conn = get_connection()
     c = conn.cursor()
-    c.execute("""
-    INSERT OR REPLACE INTO shopping_list (class_name, quantity, is_added, created_at)
-    VALUES (?, ?, 0, ?)
-    """, (class_name, quantity, now()))
+    # Eğer ürün zaten listede varsa miktarını artır, yoksa yeni ekle
+    c.execute("SELECT id, quantity FROM shopping_list WHERE class_name = ?", (class_name,))
+    row = c.fetchone()
+    if row:
+        new_qty = row[1] + quantity
+        c.execute("UPDATE shopping_list SET quantity = ? WHERE id = ?", (new_qty, row[0]))
+    else:
+        c.execute("""
+        INSERT INTO shopping_list (class_name, quantity, is_added, created_at)
+        VALUES (?, ?, 0, ?)
+        """, (class_name, quantity, now()))
     conn.commit()
     conn.close()
 

@@ -14,19 +14,20 @@
     <!-- SOL: Canlı Kamera Yayını -->
     <div class="col-md-7">
         <div class="glass-card h-100">
-            <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
-                <div class="d-flex align-items-center gap-2">
-                    <h5 class="fw-bold m-0"><i class="fas fa-broadcast-tower text-danger me-2"></i> Canlı Yayın</h5>
-                    <!-- Küçük IP Giriş Alanı -->
-                    <div class="input-group input-group-sm" style="max-width: 170px;">
-                        <input type="text" id="cameraIpInput" class="form-control bg-dark border-secondary text-white text-center shadow-none" value="{{ camera_ip }}" placeholder="192.168.1.X" style="font-size: 0.75rem; font-family: monospace; height: 28px; padding: 2px 5px; border-radius: 6px 0 0 6px;">
-                        <button onclick="saveCameraIp()" class="btn btn-outline-primary px-2" id="saveIpBtn" title="Kaydet" style="height: 28px; line-height: 1; border-radius: 0 6px 6px 0; border-color: rgba(99, 102, 241, 0.4); background: rgba(99, 102, 241, 0.1);">
-                            <i class="fas fa-save" style="font-size: 0.75rem;"></i>
+            <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-3">
+                <div class="d-flex align-items-center flex-wrap gap-2">
+                    <h5 class="fw-bold m-0 me-3"><i class="fas fa-broadcast-tower text-danger me-2"></i> Canlı Yayın</h5>
+                    <!-- Kamera IP Seçici Panel -->
+                    <div class="d-flex align-items-center bg-dark bg-opacity-50 px-2 py-1 rounded-pill border border-secondary border-opacity-25" style="backdrop-filter: blur(5px);">
+                        <span class="small text-dim me-2 px-2" style="font-size: 0.75rem; border-right: 1px solid rgba(255,255,255,0.1);"><i class="fas fa-wifi me-1 text-primary"></i>Kamera IP</span>
+                        <input type="text" id="cameraIpInput" class="bg-transparent border-0 text-white text-center shadow-none" value="{{ camera_ip }}" placeholder="192.168.1.X" style="font-size: 0.75rem; font-family: monospace; width: 100px; outline: none; padding: 0;">
+                        <button onclick="saveCameraIp()" class="btn btn-sm btn-link text-primary p-0 ps-2 pe-1 border-0" id="saveIpBtn" title="Kaydet" style="transition: transform 0.2s; outline: none; box-shadow: none;">
+                            <i class="fas fa-save" style="font-size: 0.85rem;"></i>
                         </button>
                     </div>
                 </div>
                 <div>
-                    <button onclick="toggleVision()" class="btn rounded-pill px-4" id="visionToggleBtn">
+                    <button onclick="toggleVision()" class="btn btn-premium rounded-pill px-4" id="visionToggleBtn">
                         <i class="fas fa-play-circle me-1" id="toggleIcon"></i> <span id="toggleText">Sistemi Başlat</span>
                     </button>
                 </div>
@@ -34,7 +35,7 @@
             
             <div class="position-relative bg-dark rounded-4 overflow-hidden border border-secondary border-opacity-25" style="min-height: 400px; display: flex; align-items: center; justify-content: center;">
                 <!-- Ham IP kamera önizlemesi (başlamadan önce) -->
-                <img id="rawStream" src="{{ video_source }}" alt="IP Camera" class="w-100 h-100 object-fit-cover" style="opacity: 0.3; transition: opacity 0.3s;">
+                <img id="rawStream" src="{{ video_source }}" alt="IP Camera" class="w-100 h-100 object-fit-cover" style="display: none;">
                 
                 <!-- YOLO işlenmiş stream (başlatınca bu gösterilecek) -->
                 <img id="liveStream" src="" alt="Vision Stream" class="w-100 h-100 object-fit-cover" style="display: none;">
@@ -134,7 +135,7 @@
         .then(res => res.json())
         .then(data => {
             saveBtn.disabled = false;
-            saveBtn.innerHTML = '<i class="fas fa-save" style="font-size: 0.75rem;"></i>';
+            saveBtn.innerHTML = '<i class="fas fa-save" style="font-size: 0.85rem;"></i>';
             if (data.status === 'success') {
                 alert('Kamera kaynağı başarıyla kaydedildi: ' + sourceVal);
                 const rawStream = document.getElementById('rawStream');
@@ -147,7 +148,7 @@
         })
         .catch(err => {
             saveBtn.disabled = false;
-            saveBtn.innerHTML = '<i class="fas fa-save" style="font-size: 0.75rem;"></i>';
+            saveBtn.innerHTML = '<i class="fas fa-save" style="font-size: 0.85rem;"></i>';
             alert('Bağlantı hatası oluştu.');
         });
     }
@@ -220,8 +221,7 @@
                 
                 liveStream.src = '';
                 liveStream.style.display = 'none';
-                rawStream.style.display = 'block';
-                rawStream.style.opacity = '0.3';
+                rawStream.style.display = 'none';
                 streamOverlay.style.display = 'block';
                 loadingOverlay.style.display = 'none';
                 recIcon.style.display = 'none';
