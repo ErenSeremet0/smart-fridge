@@ -779,13 +779,21 @@ def capture_and_analyze_route():
 # --- Recipes (Sayfa) ---
 @app.route("/recipes")
 def recipes():
-    return render_template("recipes.html")
+    df = db.get_inventory()
+    active_items = df[df["quantity"] > 0].to_dict(orient="records")
+    return render_template("recipes.html", items=active_items)
 
 # --- Recipes (API - Gecikmeli Yükleme) ---
-@app.route("/api/suggest_recipes")
+@app.route("/api/suggest_recipes", methods=["GET", "POST"])
 def suggest_recipes():
-    df = db.get_inventory()
-    available_items = df[df["quantity"] > 0]["class_name"].tolist()
+    available_items = []
+    if request.method == "POST":
+        data = request.json or {}
+        available_items = data.get("items", [])
+        
+    if not available_items:
+        df = db.get_inventory()
+        available_items = df[df["quantity"] > 0]["class_name"].tolist()
     items_str = ", ".join(available_items)
 
     if not items_str:
