@@ -663,7 +663,7 @@ def vision_sync_route():
         db.update_inventory(product, delta, image_path=image_path, source=source_label)
         synced += 1
         
-        if image_path:
+        if image_path and not event.get("is_ai_verified", False):
             events_to_verify.append({
                 "original_name": product,
                 "quantity_delta": delta,
@@ -754,7 +754,8 @@ def capture_and_analyze_route():
                         "product_name": pname,
                         "quantity_delta": qty,
                         "confidence": 1.0,
-                        "image_path": rel_path
+                        "image_path": rel_path,
+                        "is_ai_verified": True
                     }
                     live_events.append(e_dict)
                     detected_items.append(f"{qty} {pname}")
