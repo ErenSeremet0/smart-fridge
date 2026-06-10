@@ -10,27 +10,21 @@
     </div>
 </div>
 
-<div class="row mb-4">
-    <div class="col-12">
-        <div class="glass-card">
-            <h5 class="fw-bold mb-3"><i class="fas fa-cog me-2 text-primary"></i> Kamera Kaynağı Ayarı</h5>
-            <div class="input-group">
-                <input type="text" id="cameraSourceInput" class="form-control bg-dark border-secondary text-white" value="{{ video_source }}" placeholder="Örn: http://192.168.1.50:8080/video veya 0">
-                <button onclick="saveCameraSource()" class="btn btn-primary px-4" id="saveSourceBtn">
-                    <i class="fas fa-save me-2"></i> Kaydet
-                </button>
-            </div>
-            <small class="text-muted d-block mt-2">Telefonunuzdaki IP Webcam uygulamasındaki video akış adresini (örn. sonu /video ile biten linki) veya doğrudan bağlı bir USB kamera için 0 yazıp kaydedin.</small>
-        </div>
-    </div>
-</div>
-
 <div class="row g-4">
     <!-- SOL: Canlı Kamera Yayını -->
     <div class="col-md-7">
         <div class="glass-card h-100">
-            <div class="d-flex justify-content-between align-items-center mb-4">
-                <h5 class="fw-bold m-0"><i class="fas fa-broadcast-tower text-danger me-2"></i> Canlı Yayın</h5>
+            <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+                <div class="d-flex align-items-center gap-2">
+                    <h5 class="fw-bold m-0"><i class="fas fa-broadcast-tower text-danger me-2"></i> Canlı Yayın</h5>
+                    <!-- Küçük IP Giriş Alanı -->
+                    <div class="input-group input-group-sm" style="max-width: 170px;">
+                        <input type="text" id="cameraIpInput" class="form-control bg-dark border-secondary text-white text-center shadow-none" value="{{ camera_ip }}" placeholder="192.168.1.X" style="font-size: 0.75rem; font-family: monospace; height: 28px; padding: 2px 5px; border-radius: 6px 0 0 6px;">
+                        <button onclick="saveCameraIp()" class="btn btn-outline-primary px-2" id="saveIpBtn" title="Kaydet" style="height: 28px; line-height: 1; border-radius: 0 6px 6px 0; border-color: rgba(99, 102, 241, 0.4); background: rgba(99, 102, 241, 0.1);">
+                            <i class="fas fa-save" style="font-size: 0.75rem;"></i>
+                        </button>
+                    </div>
+                </div>
                 <div>
                     <button onclick="toggleVision()" class="btn rounded-pill px-4" id="visionToggleBtn">
                         <i class="fas fa-play-circle me-1" id="toggleIcon"></i> <span id="toggleText">Sistemi Başlat</span>
@@ -115,16 +109,22 @@
 </style>
 
 <script>
-    function saveCameraSource() {
-        const sourceVal = document.getElementById('cameraSourceInput').value.trim();
-        if (!sourceVal) {
-            alert('Lütfen geçerli bir kamera kaynağı girin.');
+    function saveCameraIp() {
+        const ipVal = document.getElementById('cameraIpInput').value.trim();
+        if (!ipVal) {
+            alert('Lütfen geçerli bir IP adresi veya USB kamerası girin.');
             return;
         }
         
-        const saveBtn = document.getElementById('saveSourceBtn');
+        let sourceVal = ipVal;
+        if (!/^\d+$/.test(ipVal)) {
+            let cleanIp = ipVal.replace(/^https?:\/\//, '').split(':')[0].split('/')[0];
+            sourceVal = `http://${cleanIp}:8080/video`;
+        }
+        
+        const saveBtn = document.getElementById('saveIpBtn');
         saveBtn.disabled = true;
-        saveBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i> Kaydediliyor...';
+        saveBtn.innerHTML = '<i class="fas fa-spinner fa-spin" style="font-size: 0.75rem;"></i>';
         
         fetch('/api/save_camera_source', {
             method: 'POST',
@@ -134,12 +134,12 @@
         .then(res => res.json())
         .then(data => {
             saveBtn.disabled = false;
-            saveBtn.innerHTML = '<i class="fas fa-save me-2"></i> Kaydet';
+            saveBtn.innerHTML = '<i class="fas fa-save" style="font-size: 0.75rem;"></i>';
             if (data.status === 'success') {
-                alert('Kamera kaynağı başarıyla güncellendi: ' + data.source);
+                alert('Kamera kaynağı başarıyla kaydedildi: ' + sourceVal);
                 const rawStream = document.getElementById('rawStream');
                 if (rawStream) {
-                    rawStream.src = data.source;
+                    rawStream.src = sourceVal;
                 }
             } else {
                 alert('Hata: ' + data.message);
@@ -147,7 +147,7 @@
         })
         .catch(err => {
             saveBtn.disabled = false;
-            saveBtn.innerHTML = '<i class="fas fa-save me-2"></i> Kaydet';
+            saveBtn.innerHTML = '<i class="fas fa-save" style="font-size: 0.75rem;"></i>';
             alert('Bağlantı hatası oluştu.');
         });
     }

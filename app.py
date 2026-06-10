@@ -404,9 +404,16 @@ def vision_events():
     except:
         pass
     
+    # URL'den IP adresini ayıkla (http://IP:8080/video formatı için)
+    camera_ip = ""
+    if video_source.startswith("http://") and ":8080/video" in video_source:
+        camera_ip = video_source.replace("http://", "").replace(":8080/video", "")
+    else:
+        camera_ip = video_source
+        
     display_source = url_for('video_feed') if vision_running else video_source
     
-    return render_template("vision.html", status={"total_events": len(live_events), "events": live_events}, is_running=vision_running, video_source=display_source)
+    return render_template("vision.html", status={"total_events": len(live_events), "events": live_events}, is_running=vision_running, video_source=display_source, camera_ip=camera_ip)
 
 @app.route('/video_feed')
 def video_feed():
