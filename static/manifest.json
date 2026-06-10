@@ -2,7 +2,7 @@
   "name": "Smart Fridge OS",
   "short_name": "FridgeOS",
   "start_url": "/",
-  "display": "standalone",
+  "display": "fullscreen",
   "orientation": "portrait",
   "background_color": "#090514",
   "theme_color": "#090514",
