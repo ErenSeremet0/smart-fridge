@@ -9,43 +9,43 @@
 </div>
 
 <div class="row g-4">
-    <!-- Sol Panel: Malzeme Seçim Paneli (Oyun Envanteri Slotları) -->
+    <!-- Sol Panel: Malzeme Seçim Listesi (Alt Alta Dikey Slotlar) -->
     <div class="col-md-4 col-lg-3">
-        <div class="glass-card p-3 h-100 d-flex flex-column">
+        <div class="glass-card p-3 d-flex flex-column" style="max-height: 600px;">
             <h5 class="text-white mb-2 fw-bold"><i class="fas fa-carrot text-primary me-2"></i> Malzeme Seçimi</h5>
             <p class="text-dim small mb-3">Tarifte kullanılmasını istediğiniz malzemelerin üzerine tıklayarak seçin veya çıkarın.</p>
             
-            <div class="row row-cols-2 row-cols-md-2 row-cols-xl-3 g-2 overflow-y-auto flex-grow-1" id="inventory-slots" style="max-height: 550px;">
+            <div class="d-flex flex-column gap-2 overflow-y-auto pr-1" id="inventory-slots" style="overflow-x: hidden;">
                 {% for item in items %}
-                <div class="col">
-                    <div class="inventory-slot p-2 rounded-3 text-center border position-relative select-item-card" 
-                         data-name="{{ item.class_name }}"
-                         style="border-color: rgba(255,255,255,0.08); background: rgba(255,255,255,0.02); cursor: pointer; transition: all 0.25s ease;"
-                         onclick="toggleSelectSlot(this)">
-                        
-                        <!-- Checkmark Indicator -->
-                        <span class="badge bg-success rounded-circle position-absolute top-0 end-0 m-1 select-badge" style="display: flex; width: 18px; height: 18px; padding: 0; justify-content: center; align-items: center; border: 1.5px solid #111;">
-                            <i class="fas fa-check" style="font-size: 0.55rem;"></i>
-                        </span>
-                        
-                        <!-- Item Image / Thumbnail -->
-                        <div class="slot-img-container mx-auto mb-1 rounded-2 overflow-hidden d-flex justify-content-center align-items-center shadow-inner" style="width: 50px; height: 50px; background: rgba(255,255,255,0.04);">
-                            {% if item.image_path %}
-                            <img src="/static/{{ item.image_path }}" style="width: 100%; height: 100%; object-fit: cover;">
-                            {% else %}
-                            <img src="/static/items_photos/{{ item.class_name | lower }}.jpg" 
-                                 onerror="this.src='https://ui-avatars.com/api/?name={{ item.class_name }}&background=6366f1&color=fff&size=50'"
-                                 style="width: 100%; height: 100%; object-fit: cover;">
-                            {% endif %}
-                        </div>
-                        
-                        <!-- Item Name and Quantity -->
-                        <div class="fw-bold text-white text-truncate small" style="font-size: 0.78rem;">{{ item.class_name }}</div>
-                        <div class="text-dim small" style="font-size: 0.65rem;">{{ item.quantity }} Adet</div>
+                <div class="inventory-slot p-2 rounded-3 border d-flex align-items-center gap-3 select-item-card position-relative" 
+                     data-name="{{ item.class_name }}"
+                     style="border-color: rgba(255,255,255,0.08); background: rgba(255,255,255,0.02); cursor: pointer; transition: all 0.25s ease;"
+                     onclick="toggleSelectSlot(this)">
+                    
+                    <!-- Item Image / Thumbnail -->
+                    <div class="slot-img-container rounded-2 overflow-hidden d-flex justify-content-center align-items-center shadow-inner" style="width: 42px; height: 42px; background: rgba(255,255,255,0.04); flex-shrink: 0;">
+                        {% if item.image_path %}
+                        <img src="/static/{{ item.image_path }}" style="width: 100%; height: 100%; object-fit: cover;">
+                        {% else %}
+                        <img src="/static/items_photos/{{ item.class_name | lower }}.jpg" 
+                             onerror="this.src='https://ui-avatars.com/api/?name={{ item.class_name }}&background=6366f1&color=fff&size=42'"
+                             style="width: 100%; height: 100%; object-fit: cover;">
+                        {% endif %}
                     </div>
+                    
+                    <!-- Item Name and Quantity -->
+                    <div class="flex-grow-1 min-width-0">
+                        <div class="fw-bold text-white text-truncate" style="font-size: 0.85rem;">{{ item.class_name }}</div>
+                        <div class="text-dim small" style="font-size: 0.72rem;">{{ item.quantity }} Adet Mevcut</div>
+                    </div>
+
+                    <!-- Checkmark Indicator -->
+                    <span class="badge bg-success rounded-circle select-badge" style="display: flex; width: 20px; height: 20px; padding: 0; justify-content: center; align-items: center; border: 1.5px solid #111; flex-shrink: 0;">
+                        <i class="fas fa-check" style="font-size: 0.6rem;"></i>
+                    </span>
                 </div>
                 {% else %}
-                <div class="col-12 text-center py-5 text-muted w-100">
+                <div class="text-center py-5 text-muted w-100">
                     <i class="fas fa-info-circle mb-2 fa-2x opacity-20 d-block mx-auto"></i>
                     <p class="m-0 small">Aktif malzeme bulunmuyor.</p>
                 </div>
@@ -56,7 +56,7 @@
 
     <!-- Sağ Panel: Tarif Öneri Sonuçları -->
     <div class="col-md-8 col-lg-9">
-        <div class="glass-card p-4 h-100 d-flex flex-column">
+        <div class="glass-card p-4 d-flex flex-column" style="min-height: 500px;">
             <div class="d-flex justify-content-between align-items-center mb-4">
                 <h5 class="m-0 text-primary fw-bold"><i class="fas fa-magic me-2"></i> Şefin Önerileri</h5>
                 <button id="suggest-btn" class="btn btn-premium px-4">
@@ -64,10 +64,10 @@
                 </button>
             </div>
             
-            <div id="recipe-box" class="recipe-content p-4 rounded-4 bg-dark bg-opacity-25 border border-secondary border-opacity-10 text-white flex-grow-1 overflow-y-auto" style="min-height: 450px;">
+            <div id="recipe-box" class="recipe-content p-4 rounded-4 bg-dark bg-opacity-25 border border-secondary border-opacity-10 text-white flex-grow-1 overflow-y-auto">
                 <div class="text-center p-5">
                     <i class="fas fa-utensils fa-3x text-secondary mb-3 opacity-20"></i>
-                    <p class="text-muted">Sol panelden malzemelerinizi seçip butona basarak Gemini AI tarafından önerilen tarifleri alabilirsiniz.</p>
+                    <p class="text-white opacity-75">Sol panelden malzemelerinizi seçip butona basarak Gemini AI tarafından önerilen tarifleri alabilirsiniz.</p>
                 </div>
             </div>
         </div>
@@ -152,7 +152,7 @@
 
 <style>
     .inventory-slot:hover {
-        transform: translateY(-2px);
+        transform: translateX(3px);
         background: rgba(255,255,255,0.05) !important;
         border-color: rgba(99, 102, 241, 0.3) !important;
     }
