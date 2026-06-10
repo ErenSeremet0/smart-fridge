@@ -181,6 +181,18 @@
         toggleText.textContent = 'Başlatılıyor...';
         streamOverlay.style.display = 'none';
         loadingOverlay.style.display = 'block';
+        
+        // Reset event counts and clear container for new session
+        knownEventCount = 0;
+        const container = document.getElementById('logContainer');
+        if (container) {
+            container.innerHTML = `
+                <div class="text-center mt-5 text-muted" id="emptyLogMsg">
+                    <i class="fas fa-history fa-2x mb-2 opacity-25"></i>
+                    <p class="small">Henüz bir hareket tespit edilmedi.</p>
+                </div>
+            `;
+        }
 
         fetch('/api/start_vision', { method: 'POST' })
             .then(r => r.json())
@@ -248,11 +260,24 @@
                 .then(data => {
                     document.getElementById('totalEventsBadge').innerText = data.total_events + ' Olay';
                     
+                    if (!data.events || data.events.length < knownEventCount) {
+                        knownEventCount = 0;
+                        const container = document.getElementById('logContainer');
+                        if (container) {
+                            container.innerHTML = `
+                                <div class="text-center mt-5 text-muted" id="emptyLogMsg">
+                                    <i class="fas fa-history fa-2x mb-2 opacity-25"></i>
+                                    <p class="small">Henüz bir hareket tespit edilmedi.</p>
+                                </div>
+                            `;
+                        }
+                    }
+                    
                     if (data.events && data.events.length > 0) {
-                        document.getElementById('emptyLogMsg').style.display = 'none';
-                        
                         if (data.events.length > knownEventCount) {
-                            const newEvents = data.events.slice(0, data.events.length - knownEventCount);
+                            const emptyMsg = document.getElementById('emptyLogMsg');
+                            if (emptyMsg) emptyMsg.style.display = 'none';
+                            const newEvents = data.events.slice(knownEventCount);
                             const container = document.getElementById('logContainer');
                             
                             newEvents.forEach(ev => {
