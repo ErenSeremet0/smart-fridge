@@ -114,5 +114,76 @@
         };
     }
 </script>
+<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+<script>
+    let activeConfirmModal = false;
+    function checkAiConfirmations() {
+        if (activeConfirmModal) return;
+        
+        fetch('/api/pending_confirmations')
+            .then(res => res.json())
+            .then(data => {
+                if (data && data.length > 0) {
+                    const conf = data[0];
+                    activeConfirmModal = true;
+                    
+                    Swal.fire({
+                        title: 'Yapay Zeka Teyit Uyarısı',
+                        html: `
+                            <div class="text-center">
+                                ${conf.image_path ? `<img src="/static/${conf.image_path}" class="rounded mb-3 shadow" style="max-height: 120px; max-width: 100%; object-fit: cover; border: 2px solid rgba(255,255,255,0.1);">` : ''}
+                                <p class="text-white mb-2">Kameranın <strong>${conf.original_name}</strong> olarak algıladığı nesneyi, Yapay Zeka <strong>${conf.ai_name}</strong> olarak teyit etti.</p>
+                                <p class="text-muted small">Bu düzeltmeyi envanterinize uygulamak istiyor musunuz?</p>
+                            </div>
+                        `,
+                        background: '#1e1b4b',
+                        color: '#ffffff',
+                        showCancelButton: true,
+                        confirmButtonText: 'Evet, Düzelt',
+                        cancelButtonText: 'Hayır, Kalsın',
+                        confirmButtonColor: '#10b981',
+                        cancelButtonColor: '#ef4444',
+                        allowOutsideClick: false
+                    }).then((result) => {
+                        const action = result.isConfirmed ? 'accept' : 'reject';
+                        
+                        fetch('/api/resolve_confirmation', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ id: conf.id, action: action })
+                        })
+                        .then(res => res.json())
+                        .then(resData => {
+                            activeConfirmModal = false;
+                            if (result.isConfirmed) {
+                                Swal.fire({
+                                    title: 'Başarılı!',
+                                    text: 'Envanter başarıyla güncellendi.',
+                                    icon: 'success',
+                                    background: '#1e1b4b',
+                                    color: '#ffffff',
+                                    confirmButtonColor: '#6366f1',
+                                    timer: 1500
+                                }).then(() => {
+                                    window.location.reload();
+                                });
+                            } else {
+                                checkAiConfirmations();
+                            }
+                        })
+                        .catch(err => {
+                            activeConfirmModal = false;
+                        });
+                    });
+                }
+            })
+            .catch(err => {
+                console.error("AI Confirmation check error:", err);
+            });
+    }
+    
+    setInterval(checkAiConfirmations, 4000);
+    setTimeout(checkAiConfirmations, 1000);
+</script>
 </body>
 </html>

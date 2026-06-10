@@ -77,6 +77,20 @@ def create_tables():
     )
     """)
 
+    # --- AI Confirmations tablosu ---
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS ai_confirmations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        original_name TEXT,
+        ai_name TEXT,
+        quantity_delta INTEGER,
+        image_path TEXT,
+        source_label TEXT,
+        status TEXT DEFAULT 'pending',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """)
+
     conn.commit()
     conn.close()
 
@@ -246,3 +260,61 @@ def get_system_logs(limit=50):
     )
     conn.close()
     return df
+
+# --- AI CONFIRMATION HELPERS ---
+def create_ai_confirmation(original_name, ai_name, quantity_delta, image_path, source_label):
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("""
+    INSERT INTO ai_confirmations (original_name, ai_name, quantity_delta, image_path, source_label)
+    VALUES (?, ?, ?, ?, ?)
+    """, (original_name, ai_name, quantity_delta, image_path, source_label))
+    conn.commit()
+    conn.close()
+
+def get_pending_confirmations():
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("""
+    SELECT id, original_name, ai_name, quantity_delta, image_path, source_label 
+    FROM ai_confirmations 
+    WHERE status = 'pending'
+    """)
+    rows = c.fetchall()
+    conn.close()
+    
+    confirmations = []
+    for r in rows:
+        confirmations.append({
+            "id": r[0],
+            "original_name": r[1],
+            "ai_name": r[2],
+            "quantity_delta": r[3],
+            "image_path": r[4],
+            "source_label": r[5]
+        })
+    return confirmations
+
+def resolve_confirmation(conf_id, action):
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("SELECT original_name, ai_name, quantity_delta, image_path, source_label FROM ai_confirmations WHERE id = ?", (conf_id,))
+    row = c.fetchone()
+    if not row:
+        conn.close()
+        return False
+        
+    original_name, ai_name, quantity_delta, image_path, source_label = row
+    
+    if action == "accept":
+        # Revert old delta from inventory
+        update_inventory(original_name, -quantity_delta, source="AI Correction Revert")
+        # Add new correct delta to inventory
+        update_inventory(ai_name, quantity_delta, image_path=image_path, source="AI Correction Apply")
+        c.execute("UPDATE ai_confirmations SET status = 'confirmed' WHERE id = ?", (conf_id,))
+    else:
+        c.execute("UPDATE ai_confirmations SET status = 'rejected' WHERE id = ?", (conf_id,))
+        
+    conn.commit()
+    conn.close()
+    return True

@@ -584,11 +584,45 @@ def stop_vision():
         return {"status": "stopped", "total_events": len(live_events)}
     return {"status": "not_running"}
 
+def async_verify_with_ai(events):
+    import time
+    from gemini_service import gemini_ile_tespit_et
+    
+    print(f"[AI VERIFY] {len(events)} adet olay icin teyit sureci baslatildi...")
+    for ev in events:
+        orig = ev["original_name"]
+        delta = ev["quantity_delta"]
+        img_path = ev["image_path"]
+        src_lbl = ev["source_label"]
+        
+        full_path = os.path.join("static", img_path)
+        if not os.path.exists(full_path):
+            continue
+            
+        try:
+            ai_result = gemini_ile_tespit_et(full_path)
+            print(f"[AI VERIFY] Gemini tespiti: {ai_result} (YOLO: {orig})")
+            
+            ai_name = None
+            if ai_result and ":" in ai_result:
+                parts = ai_result.split(",")
+                first_part = parts[0]
+                if ":" in first_part:
+                    ai_name = first_part.split(":")[0].strip()
+                    
+            if ai_name:
+                if ai_name.lower().strip() != orig.lower().strip():
+                    print(f"[AI VERIFY] Farklilik tespit edildi! YOLO: {orig} | AI: {ai_name}")
+                    db.create_ai_confirmation(orig, ai_name, delta, img_path, src_lbl)
+        except Exception as ex:
+            print(f"[AI VERIFY] Hata olustu: {ex}")
+
 @app.route("/vision/sync", methods=["POST"])
 def vision_sync_route():
     """Canlı oturumdaki olayları veritabanına senkronize eder."""
     global live_events
     synced = 0
+    events_to_verify = []
     for event in live_events:
         product = event.get('product_name', 'Bilinmeyen')
         action = event.get('action', '')
@@ -598,8 +632,18 @@ def vision_sync_route():
         source_label = f"Vision Engine ({action} — güven: {confidence:.0%})"
         db.update_inventory(product, delta, image_path=image_path, source=source_label)
         synced += 1
+        
+        if image_path:
+            events_to_verify.append({
+                "original_name": product,
+                "quantity_delta": delta,
+                "image_path": image_path,
+                "source_label": source_label
+            })
     
     if synced > 0:
+        if events_to_verify:
+            threading.Thread(target=async_verify_with_ai, args=(events_to_verify,)).start()
         live_events = []  # İşlendi, temizle
         return redirect(url_for("inventory"))
     return redirect(url_for("vision_events"))
@@ -611,6 +655,26 @@ def api_vision_status():
         "total_events": len(live_events),
         "events": live_events
     })
+
+@app.route("/api/pending_confirmations")
+def api_pending_confirmations():
+    """Teyit bekleyen AI uyuşmazlık listesini döndürür."""
+    confs = db.get_pending_confirmations()
+    return jsonify(confs)
+
+@app.route("/api/resolve_confirmation", methods=["POST"])
+def api_resolve_confirmation():
+    """AI teyidini onaylar veya reddeder."""
+    data = request.json or {}
+    conf_id = data.get("id")
+    action = data.get("action")
+    if not conf_id or not action:
+        return jsonify({"status": "error", "message": "Eksik parametre."}), 400
+        
+    success = db.resolve_confirmation(conf_id, action)
+    if success:
+        return jsonify({"status": "success"})
+    return jsonify({"status": "error", "message": "Islem basarisiz."}), 500
 
 # --- Recipes (Sayfa) ---
 @app.route("/recipes")
