@@ -833,6 +833,67 @@ def clear_inventory():
     db.clear_all_data()
     return redirect(url_for("admin"))
 
+# --- WP Contacts ---
+@app.route("/contacts", methods=["GET", "POST"])
+def contacts():
+    if request.method == "POST":
+        action = request.form.get("action")
+        if action == "add":
+            name = request.form.get("name")
+            phone = request.form.get("phone")
+            if name and phone:
+                db.create_contact(name, phone)
+        elif action == "delete":
+            contact_id = request.form.get("id")
+            if contact_id:
+                db.delete_contact(int(contact_id))
+        elif action == "update":
+            contact_id = request.form.get("id")
+            name = request.form.get("name")
+            phone = request.form.get("phone")
+            if contact_id and name and phone:
+                db.update_contact(int(contact_id), name, phone)
+        return redirect(url_for("contacts"))
+        
+    c_list = db.get_contacts()
+    return render_template("contacts.html", contacts=c_list)
+
+@app.route("/api/whatsapp/send", methods=["POST"])
+def whatsapp_send():
+    data = request.json or {}
+    contact_id = data.get("contact_id")
+    if not contact_id:
+        return jsonify({"status": "error", "message": "Kisi secilmedi."}), 400
+        
+    contacts_list = db.get_contacts()
+    contact = next((c for c in contacts_list if c["id"] == int(contact_id)), None)
+    if not contact:
+        return jsonify({"status": "error", "message": "Kisi bulunamadi."}), 404
+        
+    shop_list = db.get_shopping_list()
+    if shop_list.empty:
+        return jsonify({"status": "error", "message": "Alisveris listeniz bos."}), 400
+        
+    # Format text message
+    message_lines = ["*Smart Fridge Alisveris Listesi:*"]
+    for idx, row in shop_list.iterrows():
+        message_lines.append(f"- {row['quantity']} adet {row['class_name']}")
+        
+    message = "\n".join(message_lines)
+    
+    import urllib.parse
+    encoded_message = urllib.parse.quote(message)
+    # Clean phone number (remove non-digits)
+    phone_clean = "".join(filter(str.isdigit, contact["phone"]))
+    # Default country code to +90 if starting with 5
+    if len(phone_clean) == 10 and phone_clean.startswith("5"):
+        phone_clean = "90" + phone_clean
+        
+    whatsapp_url = f"https://api.whatsapp.com/send?phone={phone_clean}&text={encoded_message}"
+    
+    db.log_system_event("WHATSAPP_SEND", f"Alisveris listesi {contact['name']} kisisine gonderilmek uzere URL olusturuldu.")
+    return jsonify({"status": "success", "url": whatsapp_url})
+
 # --- Shopping List ---
 @app.route("/shopping", methods=["GET", "POST"])
 def shopping():
@@ -846,14 +907,15 @@ def shopping():
     shop_list = db.get_shopping_list()
     inventory_df = db.get_inventory()
     
-    # Miktarı 3'ten az olan ürünleri filtrele (Azalan/Tükenen)
+    # Miktari 3'ten az olan urunleri filtrele (Azalan/Tukenen)
     declining_df = inventory_df[inventory_df["quantity"] < 3]
     
-    # Alışveriş listesinde zaten olanları tavsiyelerden çıkar
+    # Alisveris listesinde zaten olanlari tavsiyelerden cikar
     already_added = set(shop_list["class_name"].tolist())
     recommendations = declining_df[~declining_df["class_name"].isin(already_added)]
     
-    return render_template("shopping.html", shop_list=shop_list, recommendations=recommendations)
+    contacts_list = db.get_contacts()
+    return render_template("shopping.html", shop_list=shop_list, recommendations=recommendations, contacts=contacts_list)
 
 # --- Voice Command (API) ---
 @app.route("/api/voice", methods=["POST"])

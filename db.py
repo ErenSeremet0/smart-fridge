@@ -91,6 +91,16 @@ def create_tables():
     )
     """)
 
+    # --- Contacts tablosu ---
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS contacts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        phone TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """)
+
     conn.commit()
     conn.close()
 
@@ -318,3 +328,32 @@ def resolve_confirmation(conf_id, action):
     conn.commit()
     conn.close()
     return True
+
+def get_contacts():
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("SELECT id, name, phone FROM contacts ORDER BY name ASC")
+    rows = c.fetchall()
+    conn.close()
+    return [{"id": r[0], "name": r[1], "phone": r[2]} for r in rows]
+
+def create_contact(name, phone):
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("INSERT INTO contacts (name, phone) VALUES (?, ?)", (name, phone))
+    conn.commit()
+    conn.close()
+
+def delete_contact(contact_id):
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("DELETE FROM contacts WHERE id = ?", (contact_id,))
+    conn.commit()
+    conn.close()
+
+def update_contact(contact_id, name, phone):
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("UPDATE contacts SET name = ?, phone = ? WHERE id = ?", (name, phone, contact_id))
+    conn.commit()
+    conn.close()
