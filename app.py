@@ -265,12 +265,16 @@ vision_running = False
 latest_frame = None
 live_events = []  # Canlı oturumda tespit edilen olaylar (bellekte)
 
-def run_vision_engine_thread():
-    global vision_running, latest_frame, live_events
-    print("[VISION THREAD] Thread başlatıldı...")
-    
-    # Video kaynağını oku
-    video_source = ""
+def get_camera_source():
+    if os.path.exists("camera_source.txt"):
+        try:
+            with open("camera_source.txt", "r", encoding="utf-8") as f:
+                src = f.read().strip()
+                if src:
+                    return src
+        except:
+            pass
+    video_source = "http://192.168.1.106:8080/video"
     try:
         with open("package-b-vision/vision_engine.py", "r", encoding="utf-8") as f:
             for line in f:
@@ -279,6 +283,21 @@ def run_vision_engine_thread():
                     break
     except:
         pass
+    return video_source
+
+def set_camera_source(source):
+    try:
+        with open("camera_source.txt", "w", encoding="utf-8") as f:
+            f.write(source)
+    except Exception as e:
+        print(f"Error saving to camera_source.txt: {e}")
+
+def run_vision_engine_thread():
+    global vision_running, latest_frame, live_events
+    print("[VISION THREAD] Thread başlatıldı...")
+    
+    # Video kaynağını oku
+    video_source = get_camera_source()
     print(f"[VISION THREAD] Video kaynağı: {video_source}")
 
     try:
@@ -496,15 +515,7 @@ def run_vision_engine_thread():
 
 @app.route("/vision")
 def vision_events():
-    video_source = ""
-    try:
-        with open("package-b-vision/vision_engine.py", "r", encoding="utf-8") as f:
-            for line in f:
-                if line.startswith("VIDEO_SOURCE") and "=" in line:
-                    video_source = line.split("=")[1].strip().strip('"').strip("'")
-                    break
-    except:
-        pass
+    video_source = get_camera_source()
     
     # URL'den IP adresini ayıkla (http://IP:8080/video formatı için)
     camera_ip = ""
@@ -545,28 +556,9 @@ def save_camera_source():
     if not source:
         return jsonify({"status": "error", "message": "Boş kaynak girilemez."}), 400
         
-    file_path = "package-b-vision/vision_engine.py"
     try:
-        with open(file_path, "r", encoding="utf-8") as f:
-            lines = f.readlines()
-        
-        updated = False
-        for i, line in enumerate(lines):
-            if line.strip().startswith("VIDEO_SOURCE") and "=" in line:
-                indent = line[:len(line) - len(line.lstrip())]
-                if source.isdigit():
-                    lines[i] = f"{indent}VIDEO_SOURCE = {source}\n"
-                else:
-                    lines[i] = f"{indent}VIDEO_SOURCE = \"{source}\"\n"
-                updated = True
-                break
-                
-        if updated:
-            with open(file_path, "w", encoding="utf-8") as f:
-                f.writelines(lines)
-            return jsonify({"status": "success", "source": source})
-        else:
-            return jsonify({"status": "error", "message": "VIDEO_SOURCE değişkeni bulunamadı."}), 500
+        set_camera_source(source)
+        return jsonify({"status": "success", "source": source})
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
