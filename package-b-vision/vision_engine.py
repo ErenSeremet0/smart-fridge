@@ -306,10 +306,13 @@ class FridgeDetector:
     def __init__(self, weights_path: str):
         path_obj = Path(weights_path)
         if path_obj.suffix == ".pt":
-            onnx_path = path_obj.with_suffix(".onnx")
-            if onnx_path.exists():
-                print(f"[MODEL] Otomatik .onnx modeli algılandı ve yüklendi: {onnx_path.name}")
-                weights_path = str(onnx_path)
+            import platform
+            is_pi = "arm" in platform.machine().lower() or "aarch64" in platform.machine().lower()
+            if not is_pi:
+                onnx_path = path_obj.with_suffix(".onnx")
+                if onnx_path.exists():
+                    print(f"[MODEL] Otomatik .onnx modeli algılandı ve yüklendi: {onnx_path.name}")
+                    weights_path = str(onnx_path)
         self.model = YOLO(weights_path)
 
     @property

@@ -15,8 +15,10 @@ def load_model():
     """YOLO modelini yükler ve döndürür."""
     global _model
     if _model is None:
+        import platform
+        is_pi = "arm" in platform.machine().lower() or "aarch64" in platform.machine().lower()
         onnx_path = MODEL_PATH.with_suffix(".onnx")
-        if onnx_path.exists():
+        if onnx_path.exists() and not is_pi:
             _model = YOLO(str(onnx_path), task="detect")
             print(f"[MODEL] YOLO ONNX modeli yüklendi: {onnx_path.name}")
         else:
