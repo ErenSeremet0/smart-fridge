@@ -715,6 +715,66 @@ def api_ai_tasks():
         "tasks": ai_check_tasks
     })
 
+@app.route("/api/capture_and_analyze", methods=["POST"])
+def capture_and_analyze_route():
+    global latest_frame, live_events
+    if latest_frame is None:
+        return jsonify({"status": "error", "message": "Canli yayin aktif degil."}), 400
+        
+    try:
+        import uuid
+        from gemini_service import gemini_ile_tespit_et
+        
+        filename = f"manual_{uuid.uuid4().hex[:8]}.jpg"
+        rel_path = f"items_photos/{filename}"
+        full_path = os.path.join("static", rel_path)
+        
+        with open(full_path, "wb") as f:
+            f.write(latest_frame)
+            
+        print(f"[MANUAL CAPTURE] Goruntu kaydedildi: {full_path}")
+        
+        ai_result = gemini_ile_tespit_et(full_path)
+        print(f"[MANUAL CAPTURE] Gemini sonucu: {ai_result}")
+        
+        detected_items = []
+        if ai_result and "hata" not in ai_result.lower():
+            parts = ai_result.split(",")
+            for part in parts:
+                if ":" in part:
+                    pname, qty_str = part.split(":")
+                    pname = pname.strip()
+                    try:
+                        qty = int(qty_str.strip())
+                    except:
+                        qty = 1
+                    
+                    e_dict = {
+                        "action": "GIRIS",
+                        "product_name": pname,
+                        "quantity_delta": qty,
+                        "confidence": 1.0,
+                        "image_path": rel_path
+                    }
+                    live_events.append(e_dict)
+                    detected_items.append(f"{qty} {pname}")
+                    
+        if detected_items:
+            return jsonify({
+                "status": "success",
+                "message": f"Algilanan Urunler: {', '.join(detected_items)}",
+                "items": detected_items
+            })
+        else:
+            return jsonify({
+                "status": "error",
+                "message": "Goruntuden herhangi bir yiyecek/icecek algilanamadi veya AI hatasi olustu."
+            }), 400
+            
+    except Exception as e:
+        print(f"[MANUAL CAPTURE] Hata: {e}")
+        return jsonify({"status": "error", "message": f"Islem sirasinda hata olustu: {str(e)}"}), 500
+
 # --- Recipes (Sayfa) ---
 @app.route("/recipes")
 def recipes():

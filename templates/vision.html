@@ -26,9 +26,12 @@
                         </button>
                     </div>
                 </div>
-                <div>
+                <div class="d-flex align-items-center gap-2">
                     <button onclick="toggleVision()" class="btn btn-premium rounded-pill px-4" id="visionToggleBtn">
                         <i class="fas fa-play-circle me-1" id="toggleIcon"></i> <span id="toggleText">Sistemi Başlat</span>
+                    </button>
+                    <button onclick="captureAndAnalyze()" class="btn btn-glass-primary rounded-pill px-4" id="captureBtn" style="display: none; height: 38px;">
+                        <i class="fas fa-camera me-1"></i> Görüntü Al
                     </button>
                 </div>
             </div>
@@ -207,6 +210,10 @@
                     liveStream.style.display = 'block';
                     recIcon.style.display = 'block';
                     
+                    // Show capture button
+                    const captureBtn = document.getElementById('captureBtn');
+                    if (captureBtn) captureBtn.style.display = 'inline-block';
+                    
                     btn.disabled = false;
                     btn.className = 'btn btn-outline-danger rounded-pill px-4';
                     toggleIcon.className = 'fas fa-stop-circle me-1';
@@ -237,6 +244,10 @@
                 streamOverlay.style.display = 'block';
                 loadingOverlay.style.display = 'none';
                 recIcon.style.display = 'none';
+                
+                // Hide capture button
+                const captureBtn = document.getElementById('captureBtn');
+                if (captureBtn) captureBtn.style.display = 'none';
                 
                 btn.disabled = false;
                 btn.className = 'btn btn-premium rounded-pill px-4';
@@ -311,6 +322,55 @@
                     }
                 });
         }, 1500);
+    }
+
+    function captureAndAnalyze() {
+        const captureBtn = document.getElementById('captureBtn');
+        if (!captureBtn) return;
+        const originalHtml = captureBtn.innerHTML;
+        
+        captureBtn.disabled = true;
+        captureBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i> Analiz Ediliyor...';
+        
+        fetch('/api/capture_and_analyze', { method: 'POST' })
+            .then(res => res.json())
+            .then(data => {
+                captureBtn.disabled = false;
+                captureBtn.innerHTML = originalHtml;
+                
+                if (data.status === 'success') {
+                    Swal.fire({
+                        title: 'Teyit Başarılı!',
+                        text: data.message,
+                        icon: 'success',
+                        toast: true,
+                        position: 'top-end',
+                        showConfirmButton: false,
+                        timer: 3000,
+                        background: '#1e1b4b',
+                        color: '#ffffff'
+                    });
+                } else {
+                    Swal.fire({
+                        title: 'Hata',
+                        text: data.message,
+                        icon: 'error',
+                        background: '#1e1b4b',
+                        color: '#ffffff'
+                    });
+                }
+            })
+            .catch(err => {
+                captureBtn.disabled = false;
+                captureBtn.innerHTML = originalHtml;
+                Swal.fire({
+                    title: 'Hata',
+                    text: 'İletişim hatası oluştu.',
+                    icon: 'error',
+                    background: '#1e1b4b',
+                    color: '#ffffff'
+                });
+            });
     }
 </script>
 
