@@ -41,6 +41,17 @@
         </div>
 
         <div class="d-flex align-items-center gap-3">
+            <!-- Zoom Kontrolleri -->
+            <div class="d-flex align-items-center gap-1 bg-dark bg-opacity-25 p-1 rounded-pill border border-secondary border-opacity-10" style="height: 38px;">
+                <button onclick="changeZoom(-0.05)" class="btn btn-sm btn-glass-primary rounded-circle p-0 d-flex justify-content-center align-items-center" style="width: 28px; height: 28px;" title="Uzaklaştır">
+                    <i class="fas fa-search-minus text-white" style="font-size: 0.75rem;"></i>
+                </button>
+                <span id="zoom-level-text" class="text-white small px-1 fw-bold" style="font-size: 0.7rem; min-width: 32px; text-align: center;">100%</span>
+                <button onclick="changeZoom(0.05)" class="btn btn-sm btn-glass-primary rounded-circle p-0 d-flex justify-content-center align-items-center" style="width: 28px; height: 28px;" title="Yakınlaştır">
+                    <i class="fas fa-search-plus text-white" style="font-size: 0.75rem;"></i>
+                </button>
+            </div>
+
             <!-- Tam Ekran Butonu -->
             <button onclick="toggleFullscreen()" class="btn btn-glass-primary rounded-pill p-0 d-flex justify-content-center align-items-center" style="width: 38px; height: 38px;" title="Tam Ekran">
                 <i class="fas fa-expand text-white" id="fullscreen-icon"></i>
@@ -468,6 +479,22 @@
                 });
         }
     });
+
+    // Zoom Logic
+    let currentZoom = parseFloat(localStorage.getItem('pageZoom') || '1.0');
+    function applyZoom() {
+        document.body.style.zoom = currentZoom;
+        const text = document.getElementById('zoom-level-text');
+        if (text) {
+            text.textContent = Math.round(currentZoom * 100) + '%';
+        }
+    }
+    window.changeZoom = function(delta) {
+        currentZoom = Math.max(0.5, Math.min(1.5, currentZoom + delta));
+        localStorage.setItem('pageZoom', currentZoom.toString());
+        applyZoom();
+    };
+    applyZoom();
 
     // Handle back/forward history navigation
     window.addEventListener('popstate', function() {
