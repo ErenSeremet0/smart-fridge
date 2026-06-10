@@ -383,6 +383,9 @@ def run_vision_engine_thread():
             events, frame_index = [], 0
             tracker = SimpleTracker(pipeline.config.tracker_iou_threshold, pipeline.config.tracker_max_misses) if pipeline.config.tracker_mode == "simple" else None
 
+            # Caching state to draw on skipped frames and avoid flickering
+            last_tracked_objects = []
+
             print(f"[VISION THREAD] ThreadedCamera başlatılıyor: {cam_source}")
             cam = ThreadedCamera(cam_source)
             _time.sleep(1.0) # Kameranın ısınması için bekle
@@ -397,10 +400,12 @@ def run_vision_engine_thread():
                     frame_index += 1
                     
                     # Raspberry Pi CPU yükünü azaltmak için frame skipping
-                    # Ancak atlanan karelerde tarayıcıya ham görüntüyü gönderiyoruz ki yayın pürüzsüz aksın
+                    # Ancak titremeyi engellemek için son tespitleri de çizerek gönderiyoruz!
                     if pipeline.config.vid_stride > 1 and (frame_index % pipeline.config.vid_stride) != 0:
                         if frame_callback:
-                            should_continue = frame_callback(frame)
+                            height, width = frame.shape[:2]
+                            annotated_frame = pipeline._draw(frame.copy(), last_tracked_objects, len(events), width, height)
+                            should_continue = frame_callback(annotated_frame)
                             if should_continue is False:
                                 break
                         continue
@@ -415,6 +420,7 @@ def run_vision_engine_thread():
                     )
                     
                     if not results:
+                        last_tracked_objects = []
                         if frame_callback:
                             should_continue = frame_callback(frame)
                             if should_continue is False:
@@ -425,6 +431,7 @@ def run_vision_engine_thread():
                     height, width = result.orig_shape
                     active_ids = set()
                     tracked_objects = pipeline._get_tracked(result, tracker)
+                    last_tracked_objects = tracked_objects
                     
                     for tracked in tracked_objects:
                         x1, y1, x2, y2 = tracked["bbox"]
