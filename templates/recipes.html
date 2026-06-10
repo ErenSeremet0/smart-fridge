@@ -2,62 +2,61 @@
 {% block content %}
 
 <div class="row mb-5">
-    <div class="col-12 text-center text-md-start">
+    <div class="col-12">
         <h2 class="fw-bold mb-2">Akıllı Yemek Tarifleri</h2>
         <p class="text-dim">Buzdolabındaki malzemelerinize göre Gemini AI tarafından önerilen tarifler.</p>
     </div>
 </div>
 
-<!-- Malzeme Seçim Paneli (Oyun Envanteri Slotları) -->
-<div class="row mb-4">
-    <div class="col-12">
-        <div class="glass-card p-4">
-            <h5 class="text-white mb-3 fw-bold"><i class="fas fa-carrot text-primary me-2"></i> Malzeme Seçimi</h5>
-            <p class="text-dim small mb-4">Tarifte kullanılmasını istediğiniz malzemelerin üzerine tıklayarak seçin veya çıkarın. Seçili olanlar yeşil kenarlıkla belirtilir.</p>
+<div class="row g-4">
+    <!-- Sol Panel: Malzeme Seçim Paneli (Oyun Envanteri Slotları) -->
+    <div class="col-md-4 col-lg-3">
+        <div class="glass-card p-3 h-100 d-flex flex-column">
+            <h5 class="text-white mb-2 fw-bold"><i class="fas fa-carrot text-primary me-2"></i> Malzeme Seçimi</h5>
+            <p class="text-dim small mb-3">Tarifte kullanılmasını istediğiniz malzemelerin üzerine tıklayarak seçin veya çıkarın.</p>
             
-            <div class="row row-cols-2 row-cols-sm-3 row-cols-md-4 row-cols-lg-6 g-3" id="inventory-slots">
+            <div class="row row-cols-2 row-cols-md-2 row-cols-xl-3 g-2 overflow-y-auto flex-grow-1" id="inventory-slots" style="max-height: 550px;">
                 {% for item in items %}
                 <div class="col">
-                    <div class="inventory-slot p-3 rounded-4 text-center border position-relative select-item-card" 
+                    <div class="inventory-slot p-2 rounded-3 text-center border position-relative select-item-card" 
                          data-name="{{ item.class_name }}"
                          style="border-color: rgba(255,255,255,0.08); background: rgba(255,255,255,0.02); cursor: pointer; transition: all 0.25s ease;"
                          onclick="toggleSelectSlot(this)">
                         
                         <!-- Checkmark Indicator -->
-                        <span class="badge bg-success rounded-circle position-absolute top-0 end-0 m-2 select-badge" style="display: flex; width: 22px; height: 22px; padding: 0; justify-content: center; align-items: center; border: 2px solid #111;">
-                            <i class="fas fa-check" style="font-size: 0.65rem;"></i>
+                        <span class="badge bg-success rounded-circle position-absolute top-0 end-0 m-1 select-badge" style="display: flex; width: 18px; height: 18px; padding: 0; justify-content: center; align-items: center; border: 1.5px solid #111;">
+                            <i class="fas fa-check" style="font-size: 0.55rem;"></i>
                         </span>
                         
                         <!-- Item Image / Thumbnail -->
-                        <div class="slot-img-container mx-auto mb-2 rounded-3 overflow-hidden d-flex justify-content-center align-items-center shadow-inner" style="width: 65px; height: 65px; background: rgba(255,255,255,0.04);">
+                        <div class="slot-img-container mx-auto mb-1 rounded-2 overflow-hidden d-flex justify-content-center align-items-center shadow-inner" style="width: 50px; height: 50px; background: rgba(255,255,255,0.04);">
                             {% if item.image_path %}
                             <img src="/static/{{ item.image_path }}" style="width: 100%; height: 100%; object-fit: cover;">
                             {% else %}
                             <img src="/static/items_photos/{{ item.class_name | lower }}.jpg" 
-                                 onerror="this.src='https://ui-avatars.com/api/?name={{ item.class_name }}&background=6366f1&color=fff&size=65'"
+                                 onerror="this.src='https://ui-avatars.com/api/?name={{ item.class_name }}&background=6366f1&color=fff&size=50'"
                                  style="width: 100%; height: 100%; object-fit: cover;">
                             {% endif %}
                         </div>
                         
                         <!-- Item Name and Quantity -->
-                        <div class="fw-bold text-white text-truncate small" style="font-size: 0.85rem;">{{ item.class_name }}</div>
-                        <div class="text-dim small" style="font-size: 0.72rem;">{{ item.quantity }} Adet</div>
+                        <div class="fw-bold text-white text-truncate small" style="font-size: 0.78rem;">{{ item.class_name }}</div>
+                        <div class="text-dim small" style="font-size: 0.65rem;">{{ item.quantity }} Adet</div>
                     </div>
                 </div>
                 {% else %}
                 <div class="col-12 text-center py-5 text-muted w-100">
-                    <i class="fas fa-info-circle mb-3 fa-3x opacity-20 d-block text-center mx-auto"></i>
-                    <p class="m-0 small">Buzdolabında aktif malzeme bulunmuyor. Lütfen önce vision sayfasından veya envanterden malzeme ekleyin.</p>
+                    <i class="fas fa-info-circle mb-2 fa-2x opacity-20 d-block mx-auto"></i>
+                    <p class="m-0 small">Aktif malzeme bulunmuyor.</p>
                 </div>
                 {% endfor %}
             </div>
         </div>
     </div>
-</div>
 
-<div class="row">
-    <div class="col-md-12">
-        <div class="glass-card p-4">
+    <!-- Sağ Panel: Tarif Öneri Sonuçları -->
+    <div class="col-md-8 col-lg-9">
+        <div class="glass-card p-4 h-100 d-flex flex-column">
             <div class="d-flex justify-content-between align-items-center mb-4">
                 <h5 class="m-0 text-primary fw-bold"><i class="fas fa-magic me-2"></i> Şefin Önerileri</h5>
                 <button id="suggest-btn" class="btn btn-premium px-4">
@@ -65,10 +64,10 @@
                 </button>
             </div>
             
-            <div id="recipe-box" class="recipe-content p-4 rounded-4 bg-dark bg-opacity-25 border border-secondary border-opacity-10 text-white">
+            <div id="recipe-box" class="recipe-content p-4 rounded-4 bg-dark bg-opacity-25 border border-secondary border-opacity-10 text-white flex-grow-1 overflow-y-auto" style="min-height: 450px;">
                 <div class="text-center p-5">
                     <i class="fas fa-utensils fa-3x text-secondary mb-3 opacity-20"></i>
-                    <p class="text-muted">Yukarıdan malzemelerinizi seçip butona basarak Gemini AI tarafından önerilen tarifleri alabilirsiniz.</p>
+                    <p class="text-muted">Sol panelden malzemelerinizi seçip butona basarak Gemini AI tarafından önerilen tarifleri alabilirsiniz.</p>
                 </div>
             </div>
         </div>
@@ -153,15 +152,14 @@
 
 <style>
     .inventory-slot:hover {
-        transform: translateY(-3px);
+        transform: translateY(-2px);
         background: rgba(255,255,255,0.05) !important;
         border-color: rgba(99, 102, 241, 0.3) !important;
-        box-shadow: 0 5px 15px rgba(0,0,0,0.2);
     }
     .inventory-slot.selected {
         border-color: #10b981 !important;
         background: rgba(16, 185, 129, 0.08) !important;
-        box-shadow: 0 0 15px rgba(16, 185, 129, 0.15);
+        box-shadow: 0 0 10px rgba(16, 185, 129, 0.1);
     }
 
     .recipe-content h1, .recipe-content h2, .recipe-content h3 {
