@@ -21,10 +21,23 @@ db.create_tables()
 # YOLO Model başta yükle
 model = load_model()
 
+import platform
+
+def get_system_status():
+    is_pi = "arm" in platform.machine().lower() or "aarch64" in platform.machine().lower()
+    if is_pi:
+        try:
+            with open("/sys/class/thermal/thermal_zone0/temp", "r") as f:
+                temp = float(f.read()) / 1000.0
+            return f"Raspberry Pi OS ({temp:.1f}°C)"
+        except:
+            return "Raspberry Pi OS"
+    return f"{platform.system()} ({platform.machine()})"
+
 # Context processor ile tüm template'lerde tema erişilebilir
 @app.context_processor
 def inject_theme():
-    return dict(tema=get_theme('light'))
+    return dict(tema=get_theme('light'), system_status=get_system_status())
 
 # --- Launcher (Ana Sayfa) ---
 @app.route("/")
