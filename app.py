@@ -584,12 +584,31 @@ def stop_vision():
         return {"status": "stopped", "total_events": len(live_events)}
     return {"status": "not_running"}
 
+ai_check_tasks = []
+
 def async_verify_with_ai(events):
+    global ai_check_tasks
     import time
     from gemini_service import gemini_ile_tespit_et
     
+    current_tasks = []
+    for i, ev in enumerate(events):
+        task_id = f"task_{int(time.time() * 1000)}_{i}"
+        task = {
+            "id": task_id,
+            "product_name": ev["original_name"],
+            "image_path": ev["image_path"],
+            "status": "pending",
+            "ai_result": None
+        }
+        ai_check_tasks.insert(0, task)
+        current_tasks.append((task, ev))
+        
+    ai_check_tasks = ai_check_tasks[:15]
+    
     print(f"[AI VERIFY] {len(events)} adet olay icin teyit sureci baslatildi...")
-    for ev in events:
+    for task, ev in current_tasks:
+        task["status"] = "checking"
         orig = ev["original_name"]
         delta = ev["quantity_delta"]
         img_path = ev["image_path"]
@@ -597,6 +616,8 @@ def async_verify_with_ai(events):
         
         full_path = os.path.join("static", img_path)
         if not os.path.exists(full_path):
+            task["status"] = "failed"
+            task["ai_result"] = "Dosya bulunamadi"
             continue
             
         try:
@@ -611,11 +632,20 @@ def async_verify_with_ai(events):
                     ai_name = first_part.split(":")[0].strip()
                     
             if ai_name:
+                task["ai_result"] = ai_name
                 if ai_name.lower().strip() != orig.lower().strip():
+                    task["status"] = "discrepancy"
                     print(f"[AI VERIFY] Farklilik tespit edildi! YOLO: {orig} | AI: {ai_name}")
                     db.create_ai_confirmation(orig, ai_name, delta, img_path, src_lbl)
+                else:
+                    task["status"] = "verified"
+            else:
+                task["status"] = "failed"
+                task["ai_result"] = "Format hatası"
         except Exception as ex:
             print(f"[AI VERIFY] Hata olustu: {ex}")
+            task["status"] = "failed"
+            task["ai_result"] = str(ex)
 
 @app.route("/vision/sync", methods=["POST"])
 def vision_sync_route():
@@ -675,6 +705,15 @@ def api_resolve_confirmation():
     if success:
         return jsonify({"status": "success"})
     return jsonify({"status": "error", "message": "Islem basarisiz."}), 500
+
+@app.route("/api/ai_tasks")
+def api_ai_tasks():
+    global ai_check_tasks
+    active_count = sum(1 for t in ai_check_tasks if t["status"] in ["pending", "checking"])
+    return jsonify({
+        "active_count": active_count,
+        "tasks": ai_check_tasks
+    })
 
 # --- Recipes (Sayfa) ---
 @app.route("/recipes")
