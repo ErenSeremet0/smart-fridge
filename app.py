@@ -942,5 +942,9 @@ def logs():
     df = db.get_logs()
     return render_template("logs.html", logs=df)
 
+@app.route("/sw.js")
+def service_worker_route():
+    return app.send_static_file("sw.js")
+
 if __name__=="__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
