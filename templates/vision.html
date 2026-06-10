@@ -10,6 +10,21 @@
     </div>
 </div>
 
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="glass-card">
+            <h5 class="fw-bold mb-3"><i class="fas fa-cog me-2 text-primary"></i> Kamera Kaynağı Ayarı</h5>
+            <div class="input-group">
+                <input type="text" id="cameraSourceInput" class="form-control bg-dark border-secondary text-white" value="{{ video_source }}" placeholder="Örn: http://192.168.1.50:8080/video veya 0">
+                <button onclick="saveCameraSource()" class="btn btn-primary px-4" id="saveSourceBtn">
+                    <i class="fas fa-save me-2"></i> Kaydet
+                </button>
+            </div>
+            <small class="text-muted d-block mt-2">Telefonunuzdaki IP Webcam uygulamasındaki video akış adresini (örn. sonu /video ile biten linki) veya doğrudan bağlı bir USB kamera için 0 yazıp kaydedin.</small>
+        </div>
+    </div>
+</div>
+
 <div class="row g-4">
     <!-- SOL: Canlı Kamera Yayını -->
     <div class="col-md-7">
@@ -100,6 +115,43 @@
 </style>
 
 <script>
+    function saveCameraSource() {
+        const sourceVal = document.getElementById('cameraSourceInput').value.trim();
+        if (!sourceVal) {
+            alert('Lütfen geçerli bir kamera kaynağı girin.');
+            return;
+        }
+        
+        const saveBtn = document.getElementById('saveSourceBtn');
+        saveBtn.disabled = true;
+        saveBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i> Kaydediliyor...';
+        
+        fetch('/api/save_camera_source', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ source: sourceVal })
+        })
+        .then(res => res.json())
+        .then(data => {
+            saveBtn.disabled = false;
+            saveBtn.innerHTML = '<i class="fas fa-save me-2"></i> Kaydet';
+            if (data.status === 'success') {
+                alert('Kamera kaynağı başarıyla güncellendi: ' + data.source);
+                const rawStream = document.getElementById('rawStream');
+                if (rawStream) {
+                    rawStream.src = data.source;
+                }
+            } else {
+                alert('Hata: ' + data.message);
+            }
+        })
+        .catch(err => {
+            saveBtn.disabled = false;
+            saveBtn.innerHTML = '<i class="fas fa-save me-2"></i> Kaydet';
+            alert('Bağlantı hatası oluştu.');
+        });
+    }
+
     let isRunning = false;
     let knownEventCount = 0;
     let pollInterval = null;

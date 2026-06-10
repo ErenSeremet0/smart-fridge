@@ -429,6 +429,38 @@ def video_feed():
             time.sleep(0.05)
     return Response(generate(), mimetype='multipart/x-mixed-replace; boundary=frame')
 
+@app.route("/api/save_camera_source", methods=["POST"])
+def save_camera_source():
+    data = request.json or {}
+    source = data.get("source", "").strip()
+    if not source:
+        return jsonify({"status": "error", "message": "Boş kaynak girilemez."}), 400
+        
+    file_path = "package-b-vision/vision_engine.py"
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+        
+        updated = False
+        for i, line in enumerate(lines):
+            if line.strip().startswith("VIDEO_SOURCE") and "=" in line:
+                indent = line[:len(line) - len(line.lstrip())]
+                if source.isdigit():
+                    lines[i] = f"{indent}VIDEO_SOURCE = {source}\n"
+                else:
+                    lines[i] = f"{indent}VIDEO_SOURCE = \"{source}\"\n"
+                updated = True
+                break
+                
+        if updated:
+            with open(file_path, "w", encoding="utf-8") as f:
+                f.writelines(lines)
+            return jsonify({"status": "success", "source": source})
+        else:
+            return jsonify({"status": "error", "message": "VIDEO_SOURCE değişkeni bulunamadı."}), 500
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
 @app.route("/api/start_vision", methods=["POST"])
 def start_vision():
     global vision_thread, vision_running, live_events
