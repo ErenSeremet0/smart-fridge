@@ -31,11 +31,9 @@
     <!-- Header / Top Bar -->
     <header class="p-4 d-flex justify-content-between align-items-center">
         <div class="d-flex align-items-center gap-3">
-            {% if request.endpoint != 'index' %}
-            <a href="{{ url_for('index') }}" class="btn btn-outline-secondary rounded-circle p-0 d-flex justify-content-center align-items-center shadow-sm" style="width: 45px; height: 45px; border-color: rgba(255,255,255,0.1);">
+            <a href="{{ url_for('index') }}" id="header-back-btn" class="btn btn-outline-secondary rounded-circle p-0 d-flex justify-content-center align-items-center shadow-sm" style="width: 45px; height: 45px; border-color: rgba(255,255,255,0.1); {% if request.endpoint == 'index' or request.endpoint is none %}display: none !important;{% else %}display: flex !important;{% endif %}">
                 <i class="fas fa-arrow-left text-white"></i>
             </a>
-            {% endif %}
             <div class="ms-2">
                 <h4 class="m-0 fw-bold text-white">FRIDGE OS</h4>
                 <p class="m-0 small text-dim d-none d-md-block">Akıllı Mutfak Sistemi</p>
@@ -331,6 +329,150 @@
             }
         }
     }
+
+    // SPA Dynamic Page Loader (Prevents exiting Fullscreen mode on navigation)
+    function loadPage(url, pushState = true) {
+        showLoading();
+        return fetch(url)
+            .then(res => {
+                if (res.redirected) {
+                    return loadPage(res.url, true);
+                }
+                return res.text();
+            })
+            .then(html => {
+                const parser = new DOMParser();
+                const doc = parser.parseFromString(html, 'text/html');
+                
+                // Update page title
+                document.title = doc.title;
+                
+                // Swap main content
+                const currentMain = document.querySelector('main');
+                const newMain = doc.querySelector('main');
+                if (currentMain && newMain) {
+                    currentMain.innerHTML = newMain.innerHTML;
+                }
+                
+                // Update browser history
+                if (pushState) {
+                    history.pushState({}, '', url);
+                }
+                
+                // Toggle back button visibility based on path
+                const backBtn = document.getElementById('header-back-btn');
+                if (backBtn) {
+                    const isIndex = url === '/' || url.endsWith('/') || url.endsWith('/index');
+                    if (isIndex) {
+                        backBtn.style.setProperty('display', 'none', 'important');
+                    } else {
+                        backBtn.style.setProperty('display', 'flex', 'important');
+                    }
+                }
+                
+                // Re-execute scripts inside main container safely
+                if (newMain) {
+                    const scripts = newMain.querySelectorAll('script');
+                    scripts.forEach(oldScript => {
+                        const newScript = document.createElement('script');
+                        Array.from(oldScript.attributes).forEach(attr => newScript.setAttribute(attr.name, attr.value));
+                        // Wrap in an IIFE to prevent global variable name conflicts
+                        newScript.appendChild(document.createTextNode("(function(){\n" + oldScript.innerHTML + "\n})();"));
+                        oldScript.parentNode.replaceChild(newScript, oldScript);
+                    });
+                }
+                
+                // Re-bind form submit overlays
+                document.querySelectorAll('form').forEach(f => {
+                    f.addEventListener('submit', () => showLoading());
+                });
+                
+                document.getElementById('loading-overlay').style.display = 'none';
+            })
+            .catch(err => {
+                console.error("SPA load page failed:", err);
+                document.getElementById('loading-overlay').style.display = 'none';
+                if (pushState) {
+                    window.location.href = url; // Fallback to normal navigation
+                }
+            });
+    }
+
+    // Intercept link clicks
+    document.addEventListener('click', function(e) {
+        const link = e.target.closest('a');
+        if (link && link.href && link.href.startsWith(window.location.origin)) {
+            // Exclude download links, target blank, or hash links
+            if (link.getAttribute('download') || link.target === '_blank' || link.getAttribute('href').startsWith('#') || link.href.startsWith('javascript:')) {
+                return;
+            }
+            e.preventDefault();
+            loadPage(link.href);
+        }
+    });
+
+    // Intercept form submissions
+    document.addEventListener('submit', function(e) {
+        const form = e.target;
+        if (form && form.action && form.action.startsWith(window.location.origin)) {
+            e.preventDefault();
+            
+            const formData = new FormData(form);
+            let url = form.action || window.location.href;
+            const method = form.method || 'POST';
+            
+            showLoading();
+            
+            let options = { method: method };
+            if (method.toUpperCase() === 'POST') {
+                options.body = formData;
+            } else {
+                const params = new URLSearchParams(formData).toString();
+                url = url.split('?')[0] + '?' + params;
+            }
+            
+            fetch(url, options)
+                .then(res => {
+                    if (res.redirected) {
+                        return loadPage(res.url, true);
+                    }
+                    return res.text().then(html => {
+                        const parser = new DOMParser();
+                        const doc = parser.parseFromString(html, 'text/html');
+                        
+                        document.title = doc.title;
+                        
+                        const currentMain = document.querySelector('main');
+                        const newMain = doc.querySelector('main');
+                        if (currentMain && newMain) {
+                            currentMain.innerHTML = newMain.innerHTML;
+                        }
+                        
+                        // Execute script tags safely
+                        if (newMain) {
+                            const scripts = newMain.querySelectorAll('script');
+                            scripts.forEach(oldScript => {
+                                const newScript = document.createElement('script');
+                                Array.from(oldScript.attributes).forEach(attr => newScript.setAttribute(attr.name, attr.value));
+                                newScript.appendChild(document.createTextNode("(function(){\n" + oldScript.innerHTML + "\n})();"));
+                                oldScript.parentNode.replaceChild(newScript, oldScript);
+                            });
+                        }
+                        
+                        document.getElementById('loading-overlay').style.display = 'none';
+                    });
+                })
+                .catch(err => {
+                    console.error("SPA form submission failed:", err);
+                    form.submit(); // Fallback
+                });
+        }
+    });
+
+    // Handle back/forward history navigation
+    window.addEventListener('popstate', function() {
+        loadPage(window.location.href, false);
+    });
 
     // Register PWA Service Worker
     if ('serviceWorker' in navigator) {
