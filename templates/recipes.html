@@ -1,0 +1,77 @@
+{% extends "layout.html" %}
+{% block content %}
+
+<div class="row mb-5">
+    <div class="col-12">
+        <h2 class="fw-bold mb-2">Akıllı Yemek Tarifleri</h2>
+        <p class="text-dim">Buzdolabındaki malzemelerinize göre Gemini AI tarafından önerilen tarifler.</p>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-md-12">
+        <div class="glass-card">
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <h5 class="m-0 text-primary fw-bold"><i class="fas fa-magic me-2"></i> Şefin Önerileri</h5>
+                <button id="suggest-btn" class="btn btn-premium px-4">
+                    <i class="fas fa-wand-magic-sparkles me-2"></i> Tarif Öner
+                </button>
+            </div>
+            
+            <div id="recipe-box" class="recipe-content p-4 rounded-4 bg-dark bg-opacity-25 border border-secondary border-opacity-10 text-white">
+                <div class="text-center p-5">
+                    <i class="fas fa-utensils fa-3x text-secondary mb-3 opacity-20"></i>
+                    <p class="text-muted">Butona basarak buzdolabındaki malzemelere göre tarif önerisi alabilirsiniz.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    document.getElementById('suggest-btn').onclick = function() {
+        const box = document.getElementById('recipe-box');
+        const btn = this;
+        
+        box.innerHTML = '<div class="text-center p-5"><div class="spinner-border text-primary mb-3"></div><p>Yapay zeka buzdolabına bakıyor, tarifleri hazırlıyor...</p></div>';
+        btn.disabled = true;
+
+        fetch('/api/suggest_recipes')
+        .then(res => res.json())
+        .then(data => {
+            box.innerHTML = data.recipes;
+            btn.disabled = false;
+        })
+        .catch(err => {
+            box.innerHTML = '<p class="text-danger">Bir hata oluştu. Lütfen tekrar deneyin.</p>';
+            btn.disabled = false;
+        });
+    };
+</script>
+
+<style>
+    .recipe-content h1, .recipe-content h2, .recipe-content h3 {
+        color: var(--accent);
+        margin-top: 25px;
+        font-weight: 600;
+    }
+    .recipe-content ul {
+        list-style-type: none;
+        padding-left: 0;
+    }
+    .recipe-content li {
+        margin-bottom: 10px;
+        padding-left: 25px;
+        position: relative;
+    }
+    .recipe-content li::before {
+        content: "\f058";
+        font-family: "Font Awesome 6 Free";
+        font-weight: 900;
+        position: absolute;
+        left: 0;
+        color: var(--primary);
+    }
+</style>
+
+{% endblock %}

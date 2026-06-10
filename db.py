@@ -1,0 +1,221 @@
+import sqlite3
+from datetime import datetime
+import pandas as pd
+import os
+
+DB_FILE = "fridge.db"
+
+# --- CONNECTION ---
+def get_connection():
+    os.makedirs(os.path.dirname(DB_FILE) or ".", exist_ok=True)
+    return sqlite3.connect(DB_FILE, check_same_thread=False)
+
+# --- TIME ---
+def now():
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+# --- TABLES ---
+def create_tables():
+    conn = get_connection()
+    c = conn.cursor()
+
+    # --- Inventory tablosu ---
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS inventory (
+        class_name TEXT PRIMARY KEY,
+        quantity INTEGER DEFAULT 0,
+        expiry_date TEXT,
+        image_path TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """)
+
+    # --- Shopping List tablosu ---
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS shopping_list (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        class_name TEXT UNIQUE,
+        quantity INTEGER DEFAULT 1,
+        is_added INTEGER DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """)
+
+    # --- Inventory Logs tablosu ---
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS inventory_logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        class_name TEXT,
+        action TEXT,
+        change_amount INTEGER DEFAULT 0,
+        quantity_before INTEGER DEFAULT 0,
+        quantity_after INTEGER DEFAULT 0,
+        source TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """)
+
+    # --- Detections tablosu ---
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS detections (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        image_name TEXT,
+        class_name TEXT,
+        confidence REAL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """)
+
+    # --- System Logs tablosu ---
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS system_logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        log_type TEXT,
+        message TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """)
+
+    conn.commit()
+    conn.close()
+
+# --- INVENTORY HELPERS ---
+def ensure_item(class_name, expiry_date=None, image_path=None):
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("""
+    INSERT OR IGNORE INTO inventory (class_name, quantity, expiry_date, image_path, created_at, updated_at)
+    VALUES (?, 0, ?, ?, ?, ?)
+    """, (class_name, expiry_date, image_path, now(), now()))
+    conn.commit()
+    conn.close()
+
+def get_quantity(class_name):
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("SELECT quantity FROM inventory WHERE class_name = ?", (class_name,))
+    row = c.fetchone()
+    conn.close()
+    return row[0] if row else 0
+
+def update_inventory(class_name, change_amount, expiry_date=None, image_path=None, source="manual"):
+    ensure_item(class_name, expiry_date, image_path)
+    old_qty = get_quantity(class_name)
+    new_qty = max(0, old_qty + change_amount)
+    action = "ADD" if change_amount > 0 else "REMOVE"
+
+    conn = get_connection()
+    c = conn.cursor()
+
+    # inventory güncelle
+    sql = "UPDATE inventory SET quantity = ?, updated_at = ?"
+    params = [new_qty, now()]
+    
+    if expiry_date:
+        sql += ", expiry_date = ?"
+        params.append(expiry_date)
+    if image_path:
+        sql += ", image_path = ?"
+        params.append(image_path)
+        
+    sql += " WHERE class_name = ?"
+    params.append(class_name)
+    
+    c.execute(sql, tuple(params))
+
+    # log ekle
+    c.execute("""
+    INSERT INTO inventory_logs
+    (class_name, action, change_amount, quantity_before, quantity_after, source, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+    """, (class_name, action, change_amount, old_qty, new_qty, source, now()))
+
+    conn.commit()
+    conn.close()
+
+# --- SHOPPING LIST HELPERS ---
+def get_shopping_list():
+    conn = get_connection()
+    df = pd.read_sql_query("SELECT * FROM shopping_list", conn)
+    conn.close()
+    return df
+
+def add_to_shopping_list(class_name, quantity=1):
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("""
+    INSERT OR REPLACE INTO shopping_list (class_name, quantity, is_added, created_at)
+    VALUES (?, ?, 0, ?)
+    """, (class_name, quantity, now()))
+    conn.commit()
+    conn.close()
+
+def remove_from_shopping_list(id):
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("DELETE FROM shopping_list WHERE id = ?", (id,))
+    conn.commit()
+    conn.close()
+
+# --- DETECTION ---
+def insert_detection(image_name, class_name, confidence):
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("""
+    INSERT INTO detections (image_name, class_name, confidence, created_at)
+    VALUES (?, ?, ?, ?)
+    """, (image_name, class_name, confidence, now()))
+    conn.commit()
+    conn.close()
+
+# --- GETTERS ---
+def get_inventory():
+    conn = get_connection()
+    df = pd.read_sql_query("SELECT * FROM inventory", conn)
+    conn.close()
+    return df
+
+def get_logs(limit=50):
+    conn = get_connection()
+    df = pd.read_sql_query(
+        "SELECT * FROM inventory_logs ORDER BY id DESC LIMIT ?",
+        conn,
+        params=(limit,)
+    )
+    conn.close()
+    return df
+
+def clear_all_data():
+    """Tüm veritabanı tablolarını temizler."""
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("DELETE FROM inventory")
+    c.execute("DELETE FROM inventory_logs")
+    c.execute("DELETE FROM detections")
+    c.execute("DELETE FROM shopping_list")
+    c.execute("DELETE FROM system_logs")
+    conn.commit()
+    conn.close()
+
+def log_system_event(log_type, message):
+    """Sistem olaylarını/hatalarını kaydeder."""
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("""
+    INSERT INTO system_logs (log_type, message, created_at)
+    VALUES (?, ?, ?)
+    """, (log_type, message, now()))
+    conn.commit()
+    conn.close()
+
+def get_system_logs(limit=50):
+    """En son sistem olay günlüklerini döndürür."""
+    conn = get_connection()
+    df = pd.read_sql_query(
+        "SELECT * FROM system_logs ORDER BY id DESC LIMIT ?",
+        conn,
+        params=(limit,)
+    )
+    conn.close()
+    return df

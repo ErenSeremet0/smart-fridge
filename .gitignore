@@ -1,0 +1,29 @@
+# Virtual environment
+venv/
+ENV/
+env/
+.venv/
+
+# Caches
+__pycache__/
+*.pyc
+.pycache/
+.DS_Store
+.idea/
+.vscode/
+
+# Local databases & uploads
+*.db
+fridge.db
+static/uploads/*
+!static/uploads/.gitkeep
+uploads/
+output/
+package-b-vision/output/*
+!package-b-vision/output/.gitkeep
+
+# Archives & Temp files
+*.zip
+*.rar
+*.tar.gz
+deploy_to_pi.sh

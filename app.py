@@ -1,0 +1,566 @@
+# app.py — Smart Fridge Ana Uygulama
+from flask import Flask, render_template, request, redirect, url_for, jsonify
+import db
+from detection import predict_image, load_model, format_detections, compare_results
+from PIL import Image
+import os
+from theme import get_theme
+import google.generativeai as genai
+from gemini_service import gemini_ile_tespit_et, API_KEY
+
+genai.configure(api_key=API_KEY)
+
+app = Flask(__name__)
+UPLOAD_FOLDER = "static/uploads"
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+os.makedirs("static/items_photos", exist_ok=True)
+
+# DB tablosu
+db.create_tables()
+
+# YOLO Model başta yükle
+model = load_model()
+
+# Context processor ile tüm template'lerde tema erişilebilir
+@app.context_processor
+def inject_theme():
+    return dict(tema=get_theme('light'))
+
+# --- Launcher (Ana Sayfa) ---
+@app.route("/")
+def index():
+    return render_template("index.html")
+
+# --- İstatistikler (Eski Dashboard) ---
+@app.route("/stats")
+def stats():
+    df = db.get_inventory()
+    # Sadece stokta olanları baz al
+    active_df = df[df["quantity"] > 0]
+    total = active_df["quantity"].sum() if not active_df.empty else 0
+    item_count = len(active_df) if not active_df.empty else 0
+    return render_template("stats.html", total=total, item_count=item_count, inventory=df)
+
+# --- Inventory ---
+@app.route("/inventory", methods=["GET","POST"])
+def inventory():
+    df = db.get_inventory()
+    if request.method=="POST":
+        item = request.form["item"]
+        qty = int(request.form["qty"])
+        action = request.form["action"]
+        expiry = request.form.get("expiry_date")
+        db.update_inventory(item, qty if action=="add" else -qty, expiry_date=expiry)
+        return redirect(url_for("inventory"))
+    return render_template("inventory.html", inventory=df)
+
+# --- Akıllı Göz (Ürün Tara) — Model + AI Karşılaştırma ---
+@app.route("/scan", methods=["GET", "POST"])
+def scan():
+    uploaded_filename = None
+    result_filename = None
+    model_result = None
+    gemini_result = None
+    final_result = None
+    source_info = None
+    model_detections = []
+
+    if request.method == "POST":
+        file = request.files.get("image")
+        if file and file.filename:
+            # Dosyayı kaydet
+            filename = file.filename
+            filepath = os.path.join(UPLOAD_FOLDER, filename)
+            file.save(filepath)
+            uploaded_filename = filename
+
+            # ─── ADIM 1: YOLO Model Tespiti ───
+            try:
+                detections, img_rgb = predict_image(filepath)
+                model_detections = detections
+
+                # Sonuç resmini kaydet
+                result_img = Image.fromarray(img_rgb)
+                result_filename = "result_" + uploaded_filename
+                result_img.save(os.path.join(UPLOAD_FOLDER, result_filename))
+
+                # Model sonuçlarını formatla
+                model_result = format_detections(detections)
+                print(f"[MODEL] YOLO Tespiti: {model_result}")
+            except Exception as e:
+                print(f"[HATA] YOLO Model hatası: {e}")
+                result_filename = uploaded_filename
+                model_result = ""
+
+            # ─── ADIM 2: Gemini AI Teyidi ───
+            try:
+                gemini_result = gemini_ile_tespit_et(filepath)
+                print(f"[AI] Gemini Tespiti: {gemini_result}")
+            except Exception as e:
+                print(f"[HATA] Gemini AI hatası: {e}")
+                gemini_result = ""
+
+            # ─── ADIM 3: Karşılaştırma ve Karar ───
+            final_result, source_info = compare_results(model_result, gemini_result)
+            print(f"[KARAR] Sonuç: {final_result} | Kaynak: {source_info}")
+
+    return render_template(
+        "scan.html",
+        uploaded_filename=uploaded_filename,
+        result_filename=result_filename,
+        model_result=model_result or "",
+        gemini_result=gemini_result or "",
+        final_result=final_result or "",
+        source_info=source_info or "",
+        model_detections=model_detections
+    )
+
+# --- Process AI Result (Envantere ekle) ---
+@app.route("/process_ai", methods=["POST"])
+def process_ai():
+    final_result = request.form.get("final_result")
+    source_info = request.form.get("source_info", "Bilinmiyor")
+    uploaded_filename = request.form.get("uploaded_filename")
+
+    if final_result:
+        # Format: "Ürün Adı: Adet, Ürün Adı: Adet"
+        items = final_result.split(",")
+        for item in items:
+            if ":" in item:
+                name, qty = item.rsplit(":", 1)
+                name = name.strip()
+                try:
+                    qty = int(qty.strip())
+
+                    # Ürünün resmini kopyala (ilk kez eklenen ürünler için)
+                    image_path = None
+                    if uploaded_filename:
+                        import shutil
+                        ext = os.path.splitext(uploaded_filename)[1]
+                        new_photo_name = f"{name.replace(' ', '_').lower()}{ext}"
+                        new_photo_path = os.path.join("static/items_photos", new_photo_name)
+
+                        if not os.path.exists(new_photo_path):
+                            src_path = os.path.join(UPLOAD_FOLDER, uploaded_filename)
+                            if os.path.exists(src_path):
+                                shutil.copy(src_path, new_photo_path)
+
+                        image_path = f"items_photos/{new_photo_name}"
+
+                    db.update_inventory(name, qty, image_path=image_path, source=f"Scan ({source_info})")
+                except Exception as e:
+                    print(f"İşleme hatası ({name}): {e}")
+                    continue
+        return redirect(url_for("inventory"))
+    return redirect(url_for("scan"))
+
+# --- Vision Engine Olayları (Paket B Entegrasyonu) ---
+import threading
+import cv2
+import sys
+from flask import Response
+
+TRANSLATIONS = {
+    'apple': 'Elma',
+    'banana': 'Muz',
+    'beef': 'Kırmızı Et',
+    'beetroot': 'Pancar',
+    'blueberries': 'Yaban Mersini',
+    'bread': 'Ekmek',
+    'broccoli': 'Brokoli',
+    'butter': 'Tereyağı',
+    'cabbage': 'Lahana',
+    'carrot': 'Havuç',
+    'cauliflower': 'Karnabahar',
+    'cheese': 'Peynir',
+    'chicken': 'Tavuk',
+    'chocolate': 'Çikolata',
+    'corn': 'Mısır',
+    'cucumber': 'Salatalık',
+    'eggplant': 'Patlıcan',
+    'eggs': 'Yumurta',
+    'flour': 'Un',
+    'garlic': 'Sarımsak',
+    'ginger': 'Zencefil',
+    'goat_cheese': 'Keçi Peyniri',
+    'green_beans': 'Taze Fasulye',
+    'ground_beef': 'Kıyma',
+    'ham': 'Jambon',
+    'heavy_cream': 'Krema',
+    'jalapeno': 'Halapenyo',
+    'lemon': 'Limon',
+    'lettuce': 'Marul',
+    'mayonnaise': 'Mayonez',
+    'milk': 'Süt',
+    'mushrooms': 'Mantar',
+    'natural_yoghurt': 'Yoğurt',
+    'okra': 'Bamya',
+    'onion': 'Soğan',
+    'orange': 'Portakal',
+    'peas': 'Bezelye',
+    'pepper': 'Biber',
+    'potato': 'Patates',
+    'radish': 'Turp',
+    'shrimp': 'Karides',
+    'spinach': 'Ispanak',
+    'strawberries': 'Çilek',
+    'sugar': 'Şeker',
+    'sweet_potato': 'Tatlı Patates',
+    'tomato': 'Domates',
+    'turnip': 'Şalgam'
+}
+
+vision_thread = None
+vision_running = False
+latest_frame = None
+live_events = []  # Canlı oturumda tespit edilen olaylar (bellekte)
+
+def run_vision_engine_thread():
+    global vision_running, latest_frame, live_events
+    print("[VISION THREAD] Thread başlatıldı...")
+    
+    # Video kaynağını oku
+    video_source = ""
+    try:
+        with open("package-b-vision/vision_engine.py", "r", encoding="utf-8") as f:
+            for line in f:
+                if line.startswith("VIDEO_SOURCE") and "=" in line:
+                    video_source = line.split("=")[1].strip().strip('"').strip("'")
+                    break
+    except:
+        pass
+    print(f"[VISION THREAD] Video kaynağı: {video_source}")
+
+    try:
+        sys.path.insert(0, os.path.abspath("package-b-vision"))
+        import importlib
+        import vision_engine as ve_mod
+        importlib.reload(ve_mod)
+        from vision_engine import VisionPipeline, VisionConfig
+        print("[VISION THREAD] VisionPipeline import edildi.")
+
+        from pathlib import Path
+        import platform
+        
+        is_pi = "arm" in platform.machine().lower() or "aarch64" in platform.machine().lower()
+        if is_pi:
+            print("[VISION THREAD] Raspberry Pi algılandı! Donanım optimizasyonlu profil (pi) kullanılıyor...")
+            config = VisionConfig(
+                weights_path=Path("package-b-vision/models/best.pt"),
+                tracker_mode="simple",
+                imgsz=320,
+                vid_stride=3,
+                max_det=15,
+                cpu_threads=2,
+                min_consecutive=5,
+                event_cooldown_frames=30,
+                conf=0.35,
+                show=False,
+                save_video=False
+            )
+        else:
+            config = VisionConfig(
+                weights_path=Path("package-b-vision/models/best.pt"),
+                tracker_mode="bytetrack",
+                min_consecutive=5,          # Çizgi geçişi kararlılığı için ardışık kare sayısı (artırıldı)
+                event_cooldown_frames=30,   # İki geçiş arası bekleme karesi (artırıldı, yakl. 1 saniye)
+                conf=0.35,                  # Yalancı tespitleri engellemek için güven eşiği (yükseltildi)
+                show=False,
+                save_video=False
+            )
+        print("[VISION THREAD] Config oluşturuldu, pipeline başlatılıyor...")
+        pipeline = VisionPipeline(config)
+        print("[VISION THREAD] Pipeline hazır, kameraya bağlanılıyor...")
+        
+        def update_frame(frame):
+            global latest_frame, vision_running
+            ret, buffer = cv2.imencode('.jpg', frame)
+            if ret:
+                latest_frame = buffer.tobytes()
+            return vision_running
+
+        # Event callback: her olay oluştuğunda bellekteki listeye ekle
+        original_run = pipeline.run
+        def patched_run(source, output_dir, frame_callback=None):
+            """pipeline.run'ı sarıp olayları canlı yakalayan wrapper."""
+            global live_events
+            
+            from vision_engine import VisionConfig, build_session_id, LineCrossingCounter, SimpleTracker, utc_now_iso
+            import time as _time
+            from pathlib import Path as _Path
+            from collections import Counter
+
+            session_id = build_session_id(str(source))
+            started_at, started_perf = utc_now_iso(), _time.perf_counter()
+            output_path = _Path(output_dir) / session_id
+            output_path.mkdir(parents=True, exist_ok=True)
+
+            counter = LineCrossingCounter(
+                session_id=session_id, line_orientation=pipeline.config.line_orientation,
+                line_position=pipeline.config.line_position, min_consecutive=pipeline.config.min_consecutive,
+                max_idle_frames=pipeline.config.max_idle_frames, event_cooldown_frames=pipeline.config.event_cooldown_frames
+            )
+
+            events, frame_index = [], 0
+            stream = pipeline.detector.get_stream(source, pipeline.config)
+            tracker = SimpleTracker(pipeline.config.tracker_iou_threshold, pipeline.config.tracker_max_misses) if pipeline.config.tracker_mode == "simple" else None
+
+            try:
+                for result in stream:
+                    try:
+                        frame_index += 1
+                        height, width = result.orig_shape
+                        active_ids = set()
+                        tracked_objects = pipeline._get_tracked(result, tracker)
+                        
+                        for tracked in tracked_objects:
+                            x1, y1, x2, y2 = tracked["bbox"]
+                            side = counter.compute_side((x1+x2)/2, (y1+y2)/2, width, height)
+                            p_name = pipeline.detector.class_names.get(tracked["class_id"], str(tracked["class_id"]))
+                            active_ids.add(tracked["track_id"])
+
+                            event = counter.register_detection(
+                                track_id=tracked["track_id"], product_name=p_name,
+                                confidence=tracked["confidence"], frame_index=frame_index, side=side
+                            )
+                            if event:
+                                # Çeviri tablosundan Türkçe karşılığını çek
+                                tr_name = TRANSLATIONS.get(event.product_name.lower(), event.product_name)
+                                event.product_name = tr_name
+                                e_dict = event.to_dict()
+                                
+                                # Olay anındaki nesne görüntüsünü kırpıp kaydet
+                                try:
+                                    cx1, cy1, cx2, cy2 = [int(v) for v in tracked["bbox"]]
+                                    h_img, w_img = result.orig_img.shape[:2]
+                                    cx1, cy1 = max(0, cx1), max(0, cy1)
+                                    cx2, cy2 = min(w_img, cx2), min(h_img, cy2)
+                                    
+                                    if cx2 > cx1 and cy2 > cy1:
+                                        cropped = result.orig_img[cy1:cy2, cx1:cx2]
+                                        safe_pname = tr_name.replace(' ', '_').lower()
+                                        photo_rel_path = f"items_photos/{safe_pname}.jpg"
+                                        photo_full_path = os.path.join("static", photo_rel_path)
+                                        cv2.imwrite(photo_full_path, cropped)
+                                        e_dict["image_path"] = photo_rel_path
+                                    else:
+                                        e_dict["image_path"] = None
+                                except Exception as img_err:
+                                    print(f"[VISION PHOTO] Resim kaydetme hatası: {img_err}")
+                                    e_dict["image_path"] = None
+
+                                events.append(e_dict)
+                                live_events.append(e_dict)  # Canlı listeye ekle!
+                                print(f"[EVENT] {e_dict['timestamp_utc']} - {e_dict['product_name']}: {e_dict['action']}")
+
+                        counter.prune_stale_tracks(frame_index, active_ids)
+
+                        # Frame çiz ve callback'e gönder
+                        frame = pipeline._draw(result.orig_img.copy(), tracked_objects, len(events), width, height)
+                        if frame_callback:
+                            should_continue = frame_callback(frame)
+                            if should_continue is False:
+                                break
+                    except Exception as e:
+                        print(f"[WARNING] Frame hatası: {e}")
+                        break
+            finally:
+                cv2.destroyAllWindows()
+
+            return pipeline._save_results(session_id, source, frame_index, events, started_at, started_perf, output_path)
+
+        patched_run(video_source, "package-b-vision/output", frame_callback=update_frame)
+        print("[VISION THREAD] Pipeline.run() sona erdi.")
+    except Exception as e:
+        import traceback
+        print(f"[VISION THREAD] HATA: {e}")
+        traceback.print_exc()
+    finally:
+        vision_running = False
+        print("[VISION THREAD] Thread sonlandırıldı.")
+
+@app.route("/vision")
+def vision_events():
+    video_source = ""
+    try:
+        with open("package-b-vision/vision_engine.py", "r", encoding="utf-8") as f:
+            for line in f:
+                if line.startswith("VIDEO_SOURCE") and "=" in line:
+                    video_source = line.split("=")[1].strip().strip('"').strip("'")
+                    break
+    except:
+        pass
+    
+    display_source = url_for('video_feed') if vision_running else video_source
+    
+    return render_template("vision.html", status={"total_events": len(live_events), "events": live_events}, is_running=vision_running, video_source=display_source)
+
+@app.route('/video_feed')
+def video_feed():
+    def generate():
+        global latest_frame, vision_running
+        import numpy as np
+        loading_frame = np.zeros((480, 640, 3), dtype=np.uint8)
+        cv2.putText(loading_frame, "Sistem Baslatiliyor, Lutfen Bekleyin...", (50, 240), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
+        ret, buffer = cv2.imencode('.jpg', loading_frame)
+        loading_bytes = buffer.tobytes()
+        
+        yield (b'--frame\r\n'
+               b'Content-Type: image/jpeg\r\n\r\n' + loading_bytes + b'\r\n')
+               
+        while vision_running:
+            if latest_frame is not None:
+                yield (b'--frame\r\n'
+                       b'Content-Type: image/jpeg\r\n\r\n' + latest_frame + b'\r\n')
+            import time
+            time.sleep(0.05)
+    return Response(generate(), mimetype='multipart/x-mixed-replace; boundary=frame')
+
+@app.route("/api/start_vision", methods=["POST"])
+def start_vision():
+    global vision_thread, vision_running, live_events
+    if not vision_running:
+        live_events = []  # Yeni oturumda eski olayları temizle
+        vision_running = True
+        vision_thread = threading.Thread(target=run_vision_engine_thread)
+        vision_thread.daemon = True
+        vision_thread.start()
+        return {"status": "started"}
+    return {"status": "already_running"}
+
+@app.route("/api/stop_vision", methods=["POST"])
+def stop_vision():
+    global vision_running, vision_thread
+    if vision_running:
+        vision_running = False
+        if vision_thread:
+            vision_thread.join(timeout=5)
+        return {"status": "stopped", "total_events": len(live_events)}
+    return {"status": "not_running"}
+
+@app.route("/vision/sync", methods=["POST"])
+def vision_sync_route():
+    """Canlı oturumdaki olayları veritabanına senkronize eder."""
+    global live_events
+    synced = 0
+    for event in live_events:
+        product = event.get('product_name', 'Bilinmeyen')
+        action = event.get('action', '')
+        delta = event.get('quantity_delta', 0)
+        confidence = event.get('confidence', 0)
+        image_path = event.get('image_path', None)
+        source_label = f"Vision Engine ({action} — güven: {confidence:.0%})"
+        db.update_inventory(product, delta, image_path=image_path, source=source_label)
+        synced += 1
+    
+    if synced > 0:
+        live_events = []  # İşlendi, temizle
+        return redirect(url_for("inventory"))
+    return redirect(url_for("vision_events"))
+
+@app.route("/api/vision_status")
+def api_vision_status():
+    """Canlı olay listesini JSON olarak döndürür."""
+    return jsonify({
+        "total_events": len(live_events),
+        "events": live_events
+    })
+
+# --- Recipes (Sayfa) ---
+@app.route("/recipes")
+def recipes():
+    return render_template("recipes.html")
+
+# --- Recipes (API - Gecikmeli Yükleme) ---
+@app.route("/api/suggest_recipes")
+def suggest_recipes():
+    df = db.get_inventory()
+    available_items = df[df["quantity"] > 0]["class_name"].tolist()
+    items_str = ", ".join(available_items)
+
+    if not items_str:
+        db.log_system_event("RECIPE_API", "Tarif önerisi istendi ama stokta malzeme yok.")
+        return {"recipes": "<p class='text-muted'>Buzdolabınızda malzeme bulunamadı.</p>"}
+
+    db.log_system_event("RECIPE_API", f"Tarif önerisi istendi. Kullanılan malzemeler: {items_str}")
+    try:
+        model = genai.GenerativeModel('gemini-flash-latest')
+        prompt = f"Elimde şu malzemeler var: {items_str}. Bu malzemeleri kullanarak yapılabilecek 3 harika yemek tarifi öner. Her tarif için kısa bir başlık ve kısa bir tarif yaz. Yanıtı SADECE saf HTML (div, h4, p, ul, li etiketleri) kullanarak ver. ```html blokları içine ALMA, doğrudan kodu yaz."
+        response = model.generate_content(prompt)
+        db.log_system_event("RECIPE_API", "Tarif önerisi başarıyla üretildi.")
+        return {"recipes": response.text}
+    except Exception as e:
+        print(f"Tarif hatası: {e}")
+        error_msg = str(e)
+        db.log_system_event("RECIPE_API", f"Tarif oluşturma başarısız oldu. HATA DETAYI: {error_msg}")
+        if "quota" in error_msg.lower() or "limit" in error_msg.lower() or "429" in error_msg:
+            return {
+                "recipes": (
+                    "<div class='alert alert-warning border-warning border-opacity-25 bg-warning bg-opacity-10 text-warning p-4 rounded-4' style='background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.25); color: #fbbf24;'>"
+                    "<h5 class='fw-bold mb-2'><i class='fas fa-exclamation-triangle me-2'></i>Yapay Zeka İstek Sınırı</h5>"
+                    "<p class='m-0 small'>Gemini API ücretsiz sürüm kotasını (dakikada 5 istek) doldurdunuz. Lütfen yaklaşık 30 saniye bekledikten sonra tekrar deneyin.</p>"
+                    "</div>"
+                )
+            }
+        return {"recipes": f"<p class='text-danger'>Tarif önerisi alınamadı. Hata: {error_msg}</p>"}
+
+# --- Admin Panel ---
+@app.route("/admin")
+def admin():
+    logs_df = db.get_system_logs()
+    return render_template("admin.html", system_logs=logs_df)
+
+@app.route("/admin/clear_inventory", methods=["POST"])
+def clear_inventory():
+    db.clear_all_data()
+    return redirect(url_for("admin"))
+
+# --- Shopping List ---
+@app.route("/shopping", methods=["GET", "POST"])
+def shopping():
+    if request.method == "POST":
+        if "item" in request.form:
+            db.add_to_shopping_list(request.form["item"], int(request.form.get("qty", 1)))
+        elif "delete" in request.form:
+            db.remove_from_shopping_list(int(request.form["delete"]))
+        return redirect(url_for("shopping"))
+
+    shop_list = db.get_shopping_list()
+    inventory_df = db.get_inventory()
+    
+    # Miktarı 3'ten az olan ürünleri filtrele (Azalan/Tükenen)
+    declining_df = inventory_df[inventory_df["quantity"] < 3]
+    
+    # Alışveriş listesinde zaten olanları tavsiyelerden çıkar
+    already_added = set(shop_list["class_name"].tolist())
+    recommendations = declining_df[~declining_df["class_name"].isin(already_added)]
+    
+    return render_template("shopping.html", shop_list=shop_list, recommendations=recommendations)
+
+# --- Voice Command (API) ---
+@app.route("/api/voice", methods=["POST"])
+def voice_command():
+    data = request.json
+    text = data.get("text", "").lower()
+
+    response_text = "Sizi anlayamadım."
+
+    if "buzdolabında ne var" in text or "envanter" in text:
+        df = db.get_inventory()
+        items = df[df["quantity"] > 0]
+        if not items.empty:
+            items_list = ", ".join([f"{row['quantity']} adet {row['class_name']}" for _, row in items.iterrows()])
+            response_text = f"Şu an buzdolabında şunlar var: {items_list}"
+        else:
+            response_text = "Buzdolabınız şu an boş görünüyor."
+
+    return {"response": response_text}
+
+# --- Logs ---
+@app.route("/logs")
+def logs():
+    df = db.get_logs()
+    return render_template("logs.html", logs=df)
+
+if __name__=="__main__":
+    app.run(host="0.0.0.0", port=5000, debug=True)
